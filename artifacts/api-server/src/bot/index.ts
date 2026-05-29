@@ -135,6 +135,11 @@ async function setupAndLogin(
     logger.error({ err }, "Failed to register slash commands");
   }
 
+  // Prevent unhandled Discord API errors (expired interactions, unknown interactions, etc.) from crashing the process
+  client.on(Events.Error, (err) => {
+    logger.error({ err }, "Discord client error (handled)");
+  });
+
   // Ready
   client.once(Events.ClientReady, (c) => {
     logger.info({ tag: c.user.tag, prefixEnabled }, "Discord bot ready");

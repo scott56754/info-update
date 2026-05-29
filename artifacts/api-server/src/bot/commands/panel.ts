@@ -490,6 +490,88 @@ export const panelCommands = [
   },
   {
     data: new SlashCommandBuilder()
+      .setName("keyinfo")
+      .setDescription("Look up a specific key, or see time left on all keys for a panel")
+      .addStringOption((o) => o.setName("key").setDescription("Key code to look up").setRequired(false))
+      .addStringOption((o) => o.setName("panel").setDescription("Panel name — shows all keys with time left").setRequired(false)),
+    async execute(interaction: ChatInputCommandInteraction) {
+      if (!ownerOnly(interaction)) return;
+      const keyCode = interaction.options.getString("key")?.toUpperCase().trim();
+      const panelName = interaction.options.getString("panel")?.toLowerCase().trim();
+
+      if (!keyCode && !panelName) {
+        return interaction.reply({ content: "❌ Provide either a `key` or a `panel` name.", ephemeral: true });
+      }
+
+      await interaction.deferReply({ ephemeral: true });
+      const now = new Date();
+
+      // ── Single key lookup ──────────────────────────────────────────────
+      if (keyCode) {
+        const [key] = await db.select().from(panelKeys).where(eq(panelKeys.keyCode, keyCode));
+        if (!key) return interaction.editReply({ content: "❌ Key not found." });
+
+        const expired = key.expiresAt && key.expiresAt <= now;
+        const status = !key.active ? "🔴 Revoked" : expired ? "⏰ Expired" : "🟢 Active";
+        const timeLeft = key.expiresAt
+          ? (expired ? "**Expired**" : `**${formatTimeLeft(key.expiresAt)}** left (expires <t:${Math.floor(key.expiresAt.getTime() / 1000)}:R>)`)
+          : "**Permanent** (no expiry)";
+
+        let hwid = "Not locked";
+        if (key.usedBy) {
+          const [wl] = await db.select().from(panelWhitelist)
+            .where(and(eq(panelWhitelist.panelId, key.panelId), eq(panelWhitelist.keyCode, keyCode)));
+          if (wl?.hwid) hwid = `Locked (\`${wl.hwid.slice(0, 12)}…\`)`;
+        }
+
+        const embed = new EmbedBuilder().setColor(!key.active || expired ? 0xed4245 : 0x57f287)
+          .setTitle(`🔑 Key Info`)
+          .addFields(
+            { name: "Key", value: `\`${key.keyCode}\``, inline: false },
+            { name: "Status", value: status, inline: true },
+            { name: "Redeemed By", value: key.usedBy ? `<@${key.usedBy}>` : "Unredeemed", inline: true },
+            { name: "HWID", value: hwid, inline: true },
+            { name: "Time Left", value: timeLeft, inline: false },
+            { name: "Created", value: `<t:${Math.floor(key.createdAt!.getTime() / 1000)}:R>`, inline: true },
+            { name: "Redeemed At", value: key.usedAt ? `<t:${Math.floor(key.usedAt.getTime() / 1000)}:R>` : "—", inline: true },
+          );
+        return interaction.editReply({ embeds: [embed] });
+      }
+
+      // ── All keys for a panel ───────────────────────────────────────────
+      const panel = await getPanel(interaction.guildId!, panelName!);
+      if (!panel) return interaction.editReply({ content: `❌ Panel **${panelName}** not found.` });
+
+      const keys = await db.select().from(panelKeys).where(eq(panelKeys.panelId, panel.id));
+      if (!keys.length) return interaction.editReply({ content: `No keys found for **${panelName}**.` });
+
+      const lines = keys.map((k) => {
+        const expired = k.expiresAt && k.expiresAt <= now;
+        const icon = !k.active ? "🔴" : expired ? "⏰" : "🟢";
+        const user = k.usedBy ? `<@${k.usedBy}>` : "unused";
+        const timeLeft = k.expiresAt
+          ? (expired ? "Expired" : formatTimeLeft(k.expiresAt) + " left")
+          : "Permanent";
+        return `${icon} \`${k.keyCode}\` — ${user} | ${timeLeft}`;
+      });
+
+      const content = lines.join("\n");
+      if (content.length > 1900) {
+        const fileContent = keys.map((k) => {
+          const expired = k.expiresAt && k.expiresAt <= now;
+          const status = !k.active ? "REVOKED" : expired ? "EXPIRED" : "ACTIVE";
+          const timeLeft = k.expiresAt ? (expired ? "expired" : formatTimeLeft(k.expiresAt) + " left") : "permanent";
+          return `${status} | ${k.keyCode} | user: ${k.usedBy ?? "unused"} | time_left: ${timeLeft}`;
+        }).join("\n");
+        const buf = Buffer.from(fileContent, "utf8");
+        const file = new AttachmentBuilder(buf, { name: `keyinfo-${panelName}.txt` });
+        return interaction.editReply({ content: `**${keys.length}** keys for **${panelName}**:`, files: [file] });
+      }
+      return interaction.editReply({ content: `**All keys for \`${panelName}\` (${keys.length}):**\n${content}` });
+    },
+  },
+  {
+    data: new SlashCommandBuilder()
       .setName("listpanels")
       .setDescription("List all panels in this server"),
     async execute(interaction: ChatInputCommandInteraction) {
