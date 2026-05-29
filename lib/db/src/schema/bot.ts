@@ -83,6 +83,52 @@ export const reports = pgTable("reports", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const panels = pgTable("panels", {
+  id: serial("id").primaryKey(),
+  guildId: text("guild_id").notNull(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default("This control panel is for buyers."),
+  scriptContent: text("script_content"),
+  roleId: text("role_id"),
+  createdBy: text("created_by").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (t) => [index("panels_guild_name_idx").on(t.guildId, t.name)]);
+
+export const panelKeys = pgTable("panel_keys", {
+  id: serial("id").primaryKey(),
+  panelId: integer("panel_id").notNull().references(() => panels.id, { onDelete: "cascade" }),
+  keyCode: text("key_code").notNull().unique(),
+  usedBy: text("used_by"),
+  usedAt: timestamp("used_at"),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (t) => [index("panel_keys_panel_idx").on(t.panelId)]);
+
+export const panelWhitelist = pgTable("panel_whitelist", {
+  id: serial("id").primaryKey(),
+  panelId: integer("panel_id").notNull().references(() => panels.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull(),
+  keyCode: text("key_code"),
+  hwid: text("hwid"),
+  whitelistedBy: text("whitelisted_by").notNull(),
+  whitelistedAt: timestamp("whitelisted_at").defaultNow(),
+}, (t) => [index("whitelist_panel_user_idx").on(t.panelId, t.userId)]);
+
+export const panelBlacklist = pgTable("panel_blacklist", {
+  id: serial("id").primaryKey(),
+  panelId: integer("panel_id").notNull().references(() => panels.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull(),
+  reason: text("reason").notNull().default("No reason provided"),
+  blacklistedBy: text("blacklisted_by").notNull(),
+  blacklistedAt: timestamp("blacklisted_at").defaultNow(),
+  active: boolean("active").notNull().default(true),
+}, (t) => [index("blacklist_panel_user_idx").on(t.panelId, t.userId)]);
+
+export type Panel = typeof panels.$inferSelect;
+export type PanelKey = typeof panelKeys.$inferSelect;
+export type PanelWhitelist = typeof panelWhitelist.$inferSelect;
+export type PanelBlacklist = typeof panelBlacklist.$inferSelect;
+
 export const insertGuildSettingsSchema = createInsertSchema(guildSettings).omit({ id: true, updatedAt: true });
 export const insertEconomySchema = createInsertSchema(economy).omit({ id: true });
 export const insertWarningSchema = createInsertSchema(warnings).omit({ id: true, createdAt: true });
