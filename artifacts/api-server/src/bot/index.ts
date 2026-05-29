@@ -17,7 +17,9 @@ import { musicCommands } from "./commands/music.js";
 import { setupCommands } from "./commands/setup.js";
 import { panelCommands } from "./commands/panel.js";
 import { ticketCommands, handleTicketButton, handleCloseTicket } from "./commands/ticket.js";
-import { generateKey, obfuscateLua } from "./utils/obfuscate.js";
+import { giveawayCommands, handleGiveawayButton, startGiveawayLoop } from "./commands/giveaway.js";
+import { antiNukeCommands, setupAntiNuke } from "./commands/antinuke.js";
+import { generateKey, buildLoader } from "./utils/obfuscate.js";
 import { handlePrefixMessage } from "./prefix.js";
 
 const OWNERS = ["1417552037717086355", "1501051958629503097"];
@@ -32,6 +34,8 @@ const allCommands = [
   ...setupCommands,
   ...panelCommands,
   ...ticketCommands,
+  ...giveawayCommands,
+  ...antiNukeCommands,
 ];
 
 const BASE_INTENTS = [
@@ -40,6 +44,8 @@ const BASE_INTENTS = [
   GatewayIntentBits.GuildVoiceStates,
   GatewayIntentBits.GuildInvites,
   GatewayIntentBits.DirectMessages,
+  GatewayIntentBits.GuildMembers,
+  GatewayIntentBits.GuildModeration,
 ];
 
 export async function startBot() {
@@ -52,22 +58,51 @@ export async function startBot() {
     return;
   }
 
-  // Try with MessageContent (prefix commands). If Discord rejects it, fall back without so bot stays online.
-  try {
-    const client = new Client({ intents: [...BASE_INTENTS, GatewayIntentBits.MessageContent] });
-    await setupAndLogin(client, token, clientId, guildId, true);
-  } catch (err: any) {
-    if (err?.message === "Used disallowed intents") {
-      logger.warn(
-        "MessageContent intent not enabled — prefix commands (.!?) disabled. " +
-        "To enable: discord.com/developers/applications → Bot → Privileged Gateway Intents → Message Content Intent → Save → restart bot."
-      );
-      const client = new Client({ intents: BASE_INTENTS });
-      await setupAndLogin(client, token, clientId, guildId, false);
-    } else {
-      throw err;
+  // Progressively fall back intent combinations until one works.
+  // Privileged intents (MessageContent, GuildMembers, GuildModeration) must be enabled
+  // in the Discord Developer Portal under Bot → Privileged Gateway Intents.
+  const intentSets: Array<{ intents: GatewayIntentBits[]; prefixEnabled: boolean; label: string }> = [
+    {
+      label: "full (MessageContent + GuildMembers + GuildModeration)",
+      intents: [...BASE_INTENTS, GatewayIntentBits.MessageContent],
+      prefixEnabled: true,
+    },
+    {
+      label: "no MessageContent (GuildMembers + GuildModeration)",
+      intents: BASE_INTENTS,
+      prefixEnabled: false,
+    },
+    {
+      label: "minimal (no privileged intents)",
+      intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.GuildVoiceStates,
+        GatewayIntentBits.DirectMessages,
+      ],
+      prefixEnabled: false,
+    },
+  ];
+
+  for (const { intents, prefixEnabled, label } of intentSets) {
+    try {
+      const client = new Client({ intents });
+      await setupAndLogin(client, token, clientId, guildId, prefixEnabled);
+      return;
+    } catch (err: any) {
+      if (err?.message === "Used disallowed intents") {
+        logger.warn(
+          { label },
+          "Intent set disallowed — trying next fallback. " +
+          "Enable Privileged Gateway Intents in Discord Developer Portal → Bot → Privileged Gateway Intents."
+        );
+      } else {
+        throw err;
+      }
     }
   }
+
+  logger.error("Bot failed to start — all intent combinations rejected.");
 }
 
 async function setupAndLogin(
@@ -105,6 +140,8 @@ async function setupAndLogin(
     logger.info({ tag: c.user.tag, prefixEnabled }, "Discord bot ready");
     c.user.setActivity("Serving the server", { type: 3 });
     startReminderLoop(client);
+    startGiveawayLoop(client);
+    setupAntiNuke(client);
   });
 
   // Prefix commands (.!?)
@@ -143,6 +180,14 @@ async function setupAndLogin(
         await handleTicketButton(interaction, client, interaction.customId.split(":")[1]);
         return;
       }
+      // Giveaway enter/leave
+      if (interaction.customId.startsWith("giveaway:enter:")) {
+        const giveawayId = parseInt(interaction.customId.split(":")[2]);
+        if (!isNaN(giveawayId)) {
+          await handleGiveawayButton(interaction, client, giveawayId);
+        }
+        return;
+      }
       // Panel buttons
       const [ns, action, panelName] = interaction.customId.split(":");
       if (ns !== "panel") return;
@@ -179,6 +224,11 @@ async function handlePanelButton(interaction: any, client: Client, action: strin
   const [wl] = await db.select().from(panelWhitelist)
     .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, userId)));
 
+  // Check whitelist expiry
+  if (wl?.expiresAt && wl.expiresAt <= new Date()) {
+    return interaction.reply({ content: "⏰ Your access has **expired**. Contact an admin to renew.", ephemeral: true });
+  }
+
   if (action === "redeem") {
     const modal = new ModalBuilder()
       .setCustomId(`panel-redeem:${panelName}`)
@@ -205,17 +255,23 @@ async function handlePanelButton(interaction: any, client: Client, action: strin
     const domain = process.env.REPLIT_DEV_DOMAIN
       ? `https://${process.env.REPLIT_DEV_DOMAIN}`
       : `http://localhost:${process.env.PORT ?? 8080}`;
-    const loaderUrl = `${domain}/api/loader/${encodeURIComponent(panelName)}/${encodeURIComponent(userKey)}`;
-    const scriptBlock = `script_key="${userKey}";\nloadstring(game:HttpGet("${loaderUrl}"))()`;
 
-    await interaction.reply({ content: `Here is your script:\n\`\`\`lua\n${scriptBlock}\n\`\`\``, ephemeral: true });
+    const scriptBlock = buildLoader(panelName, interaction.user.username, userKey, domain);
+
+    await interaction.reply({
+      content: `Here is your script loader. Paste this into your executor:\n\`\`\`lua\n${scriptBlock}\n\`\`\``,
+      ephemeral: true,
+    });
 
     try {
       await interaction.user.send({
-        embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle(`🔑 Your Script Key — ${panelName}`)
-          .setDescription(`\`\`\`\n${userKey}\n\`\`\``)
-          .addFields({ name: "Panel", value: panelName, inline: true })
-          .setFooter({ text: "Do not share this key." }).setTimestamp()],
+        embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle(`🔑 Your Script — ${panelName}`)
+          .setDescription(`\`\`\`lua\n${scriptBlock}\n\`\`\``)
+          .addFields(
+            { name: "Panel", value: panelName, inline: true },
+            { name: "Expires", value: wl.expiresAt ? `<t:${Math.floor(wl.expiresAt.getTime() / 1000)}:R>` : "Never", inline: true },
+          )
+          .setFooter({ text: "Do not share this script." }).setTimestamp()],
       });
     } catch {}
     return;
@@ -243,11 +299,14 @@ async function handlePanelButton(interaction: any, client: Client, action: strin
   }
 
   if (action === "stats") {
+    const expiryValue = wl?.expiresAt
+      ? (wl.expiresAt <= new Date() ? "⏰ Expired" : `<t:${Math.floor(wl.expiresAt.getTime() / 1000)}:R>`)
+      : "Never (permanent)";
     const e = new EmbedBuilder().setColor(0x2b2d31).setTitle("Your License Stats")
       .addFields(
-        { name: "Status", value: wl ? "✅ Whitelisted" : "No key", inline: false },
+        { name: "Status", value: wl ? "✅ Whitelisted" : "❌ No access", inline: false },
         { name: "HWID Locked", value: wl?.hwid ? "Yes" : "No", inline: false },
-        { name: "Expires", value: "Never (permanent)", inline: false },
+        { name: "Expires", value: expiryValue, inline: false },
       );
     await interaction.reply({ embeds: [e], ephemeral: true });
   }
@@ -271,12 +330,28 @@ async function handlePanelRedeem(interaction: any, client: Client, panelName: st
   if (!key) return interaction.reply({ content: "❌ Invalid or already used key. Please check and try again.", ephemeral: true });
   if (key.usedBy && key.usedBy !== interaction.user.id) return interaction.reply({ content: "❌ This key has already been redeemed by someone else.", ephemeral: true });
 
+  // Check key expiry
+  if (key.expiresAt && key.expiresAt <= new Date()) {
+    return interaction.reply({ content: "❌ This key has expired and can no longer be redeemed.", ephemeral: true });
+  }
+
   await db.update(panelKeys).set({ usedBy: interaction.user.id, usedAt: new Date() }).where(eq(panelKeys.id, key.id));
-  await db.insert(panelWhitelist).values({ panelId: panel.id, userId: interaction.user.id, keyCode: keyInput, whitelistedBy: "key-redemption" });
+  await db.insert(panelWhitelist).values({
+    panelId: panel.id,
+    userId: interaction.user.id,
+    keyCode: keyInput,
+    whitelistedBy: "key-redemption",
+    expiresAt: key.expiresAt,
+  });
+
+  const expiryNote = key.expiresAt
+    ? `\nYour access expires <t:${Math.floor(key.expiresAt.getTime() / 1000)}:R>.`
+    : "";
 
   await interaction.reply({
     embeds: [new EmbedBuilder().setColor(0x57f287).setTitle("✅ Key Redeemed!")
-      .setDescription(`You are now whitelisted for **${panelName}**!\nClick **Get Script** to access your script.`).setTimestamp()],
+      .setDescription(`You are now whitelisted for **${panelName}**!\nClick **Get Script** to access your script.${expiryNote}`)
+      .setTimestamp()],
     ephemeral: true,
   });
 
@@ -290,6 +365,7 @@ async function handlePanelRedeem(interaction: any, client: Client, panelName: st
             { name: "User", value: `${interaction.user.tag} (${interaction.user.id})`, inline: true },
             { name: "Panel", value: panelName, inline: true },
             { name: "Key", value: keyInput, inline: true },
+            { name: "Expires", value: key.expiresAt ? `<t:${Math.floor(key.expiresAt.getTime() / 1000)}:R>` : "Never", inline: true },
           ).setTimestamp()],
       });
     } catch {}

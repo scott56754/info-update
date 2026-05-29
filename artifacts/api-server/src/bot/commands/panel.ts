@@ -52,6 +52,30 @@ function panelButtons(panelName: string) {
   return [row1, row2, row3];
 }
 
+function parseDuration(s: string): number | null {
+  const match = s.match(/^(\d+)(h|d|w|m)$/i);
+  if (!match) return null;
+  const n = parseInt(match[1]);
+  const unit = match[2].toLowerCase();
+  const ms: Record<string, number> = { h: 3_600_000, d: 86_400_000, w: 604_800_000, m: 30 * 86_400_000 };
+  return n * (ms[unit] ?? 0);
+}
+
+function formatTimeLeft(expiresAt: Date | null | undefined): string {
+  if (!expiresAt) return "Never";
+  const now = Date.now();
+  const diff = expiresAt.getTime() - now;
+  if (diff <= 0) return "⏰ Expired";
+  const d = Math.floor(diff / 86_400_000);
+  const h = Math.floor((diff % 86_400_000) / 3_600_000);
+  const m = Math.floor((diff % 3_600_000) / 60_000);
+  const parts: string[] = [];
+  if (d > 0) parts.push(`${d}d`);
+  if (h > 0) parts.push(`${h}h`);
+  if (m > 0) parts.push(`${m}m`);
+  return parts.length ? parts.join(" ") : "<1m";
+}
+
 export const panelCommands = [
   {
     data: new SlashCommandBuilder()
@@ -142,20 +166,27 @@ export const panelCommands = [
       .setName("whitelist")
       .setDescription("Whitelist a user for a panel")
       .addStringOption((o) => o.setName("panel").setDescription("Panel name").setRequired(true))
-      .addUserOption((o) => o.setName("user").setDescription("User to whitelist").setRequired(true)),
+      .addUserOption((o) => o.setName("user").setDescription("User to whitelist").setRequired(true))
+      .addStringOption((o) => o.setName("duration").setDescription("How long access lasts e.g. 7d, 30d, 1h (leave blank for permanent)").setRequired(false)),
     async execute(interaction: ChatInputCommandInteraction) {
       if (!ownerOnly(interaction)) return;
       const name = interaction.options.getString("panel", true).toLowerCase();
       const target = interaction.options.getUser("user", true);
+      const durationStr = interaction.options.getString("duration");
       const panel = await getPanel(interaction.guildId!, name);
       if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, ephemeral: true });
 
-      // Check if already whitelisted
+      let expiresAt: Date | null = null;
+      if (durationStr) {
+        const ms = parseDuration(durationStr);
+        if (!ms) return interaction.reply({ content: "❌ Invalid duration format. Use e.g. `7d`, `30d`, `24h`.", ephemeral: true });
+        expiresAt = new Date(Date.now() + ms);
+      }
+
       const [existing] = await db.select().from(panelWhitelist)
         .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, target.id)));
       if (existing) return interaction.reply({ content: `❌ ${target.tag} is already whitelisted for **${name}**.`, ephemeral: true });
 
-      // Check blacklist
       const [bl] = await db.select().from(panelBlacklist)
         .where(and(eq(panelBlacklist.panelId, panel.id), eq(panelBlacklist.userId, target.id), eq(panelBlacklist.active, true)));
       if (bl) return interaction.reply({ content: `❌ ${target.tag} is blacklisted from **${name}**. Unblacklist them first.`, ephemeral: true });
@@ -164,23 +195,25 @@ export const panelCommands = [
         panelId: panel.id,
         userId: target.id,
         whitelistedBy: interaction.user.id,
+        expiresAt,
       });
 
       const embed = new EmbedBuilder().setColor(0x57f287).setTitle("✅ User Whitelisted")
         .addFields(
           { name: "User", value: `${target.tag} (${target.id})`, inline: true },
           { name: "Panel", value: name, inline: true },
-          { name: "By", value: interaction.user.tag, inline: true }
+          { name: "By", value: interaction.user.tag, inline: true },
+          { name: "Expires", value: expiresAt ? `<t:${Math.floor(expiresAt.getTime() / 1000)}:R>` : "Never (permanent)", inline: true },
         );
       await interaction.reply({ embeds: [embed] });
 
-      // DM the user
       try {
         const dmEmbed = new EmbedBuilder().setColor(0x57f287)
           .setTitle("✅ You have been whitelisted!")
           .setDescription(
             `You have been whitelisted for the **${name}** script.\nYou can access the script via the panel in the server.`
           )
+          .addFields({ name: "Expires", value: expiresAt ? `<t:${Math.floor(expiresAt.getTime() / 1000)}:R>` : "Never (permanent)", inline: true })
           .setTimestamp();
         await target.send({ embeds: [dmEmbed] });
       } catch {}
@@ -224,11 +257,9 @@ export const panelCommands = [
       const panel = await getPanel(interaction.guildId!, name);
       if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, ephemeral: true });
 
-      // Remove from whitelist first
       await db.delete(panelWhitelist)
         .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, target.id)));
 
-      // Deactivate old blacklist, insert new
       await db.update(panelBlacklist).set({ active: false })
         .where(and(eq(panelBlacklist.panelId, panel.id), eq(panelBlacklist.userId, target.id)));
       await db.insert(panelBlacklist).values({
@@ -246,7 +277,6 @@ export const panelCommands = [
         );
       await interaction.reply({ embeds: [embed] });
 
-      // DM the user
       try {
         const dmEmbed = new EmbedBuilder().setColor(0xed4245)
           .setTitle("🔨 You have been blacklisted")
@@ -285,29 +315,48 @@ export const panelCommands = [
       .setName("generatekeys")
       .setDescription("Generate keys for a panel")
       .addStringOption((o) => o.setName("panel").setDescription("Panel name").setRequired(true))
-      .addIntegerOption((o) => o.setName("count").setDescription("Number of keys to generate (1-50)").setMinValue(1).setMaxValue(50).setRequired(false)),
+      .addIntegerOption((o) => o.setName("count").setDescription("Number of keys to generate (1-50)").setMinValue(1).setMaxValue(50).setRequired(false))
+      .addStringOption((o) => o.setName("duration").setDescription("Key expiry duration e.g. 7d, 30d, 24h (leave blank for permanent)").setRequired(false)),
     async execute(interaction: ChatInputCommandInteraction) {
       if (!ownerOnly(interaction)) return;
       const name = interaction.options.getString("panel", true).toLowerCase();
       const count = interaction.options.getInteger("count") ?? 1;
+      const durationStr = interaction.options.getString("duration");
       const panel = await getPanel(interaction.guildId!, name);
       if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, ephemeral: true });
+
+      let expiresAt: Date | null = null;
+      if (durationStr) {
+        const ms = parseDuration(durationStr);
+        if (!ms) return interaction.reply({ content: "❌ Invalid duration format. Use e.g. `7d`, `30d`, `24h`.", ephemeral: true });
+        expiresAt = new Date(Date.now() + ms);
+      }
 
       const keys: string[] = [];
       for (let i = 0; i < count; i++) {
         const keyCode = generateKey();
-        await db.insert(panelKeys).values({ panelId: panel.id, keyCode });
+        await db.insert(panelKeys).values({ panelId: panel.id, keyCode, expiresAt });
         keys.push(keyCode);
       }
 
+      const expiryNote = expiresAt
+        ? `\n⏰ Keys expire: <t:${Math.floor(expiresAt.getTime() / 1000)}:R>`
+        : "\n⏰ Keys expire: Never (permanent)";
       const keyList = keys.map((k) => `\`${k}\``).join("\n");
-      const content = `**Generated ${count} key(s) for panel \`${name}\`:**\n${keyList}`;
+      const content = `**Generated ${count} key(s) for panel \`${name}\`:**\n${keyList}${expiryNote}`;
 
-      // Send as file if many keys
       if (keys.length > 10) {
-        const buf = Buffer.from(keys.join("\n"), "utf8");
+        const fileContent = keys.map((k) => {
+          const expiry = expiresAt ? `| expires: ${expiresAt.toISOString()}` : "| expires: never";
+          return `${k} ${expiry}`;
+        }).join("\n");
+        const buf = Buffer.from(fileContent, "utf8");
         const file = new AttachmentBuilder(buf, { name: `keys-${name}.txt` });
-        return interaction.reply({ content: `✅ Generated ${count} keys for **${name}**.`, files: [file], ephemeral: true });
+        return interaction.reply({
+          content: `✅ Generated ${count} keys for **${name}**.${expiryNote}`,
+          files: [file],
+          ephemeral: true,
+        });
       }
       await interaction.reply({ content, ephemeral: true });
     },
@@ -326,10 +375,25 @@ export const panelCommands = [
       const keys = await db.select().from(panelKeys).where(eq(panelKeys.panelId, panel.id));
       if (!keys.length) return interaction.reply({ content: `No keys found for **${name}**.`, ephemeral: true });
 
-      const lines = keys.map((k) => `${k.active ? "🟢" : "🔴"} \`${k.keyCode}\` ${k.usedBy ? `— used by <@${k.usedBy}>` : "— unused"}`);
+      const now = new Date();
+      const lines = keys.map((k) => {
+        const expired = k.expiresAt && k.expiresAt <= now;
+        const statusIcon = !k.active || expired ? "🔴" : "🟢";
+        const usedPart = k.usedBy ? `— used by <@${k.usedBy}>` : "— unused";
+        const timeLeft = k.expiresAt ? ` | ⏰ ${expired ? "Expired" : formatTimeLeft(k.expiresAt)}` : " | ⏰ Never";
+        return `${statusIcon} \`${k.keyCode}\` ${usedPart}${timeLeft}`;
+      });
+
       const content = lines.join("\n");
       if (content.length > 1900) {
-        const buf = Buffer.from(keys.map((k) => `${k.active ? "ACTIVE" : "USED"} | ${k.keyCode} | ${k.usedBy ?? "unused"}`).join("\n"), "utf8");
+        const fileContent = keys.map((k) => {
+          const expired = k.expiresAt && k.expiresAt <= now;
+          const status = !k.active || expired ? "EXPIRED/REVOKED" : "ACTIVE";
+          const expiry = k.expiresAt ? k.expiresAt.toISOString() : "never";
+          const timeLeft = k.expiresAt ? formatTimeLeft(k.expiresAt) : "permanent";
+          return `${status} | ${k.keyCode} | used_by: ${k.usedBy ?? "unused"} | expires: ${expiry} | time_left: ${timeLeft}`;
+        }).join("\n");
+        const buf = Buffer.from(fileContent, "utf8");
         const file = new AttachmentBuilder(buf, { name: `keys-${name}.txt` });
         return interaction.reply({ content: `Found **${keys.length}** keys for **${name}**:`, files: [file], ephemeral: true });
       }
@@ -364,9 +428,16 @@ export const panelCommands = [
       const list = await db.select().from(panelWhitelist).where(eq(panelWhitelist.panelId, panel.id));
       if (!list.length) return interaction.reply({ content: `No users whitelisted for **${name}**.`, ephemeral: true });
 
+      const now = new Date();
       const embed = new EmbedBuilder().setColor(0x5865f2)
         .setTitle(`📋 Whitelist — ${name}`)
-        .setDescription(list.map((e, i) => `**${i + 1}.** <@${e.userId}>`).join("\n"))
+        .setDescription(list.map((e, i) => {
+          const expired = e.expiresAt && e.expiresAt <= now;
+          const expiry = e.expiresAt
+            ? (expired ? " ⏰ **Expired**" : ` ⏰ ${formatTimeLeft(e.expiresAt)} left`)
+            : " ⏰ Permanent";
+          return `**${i + 1}.** <@${e.userId}>${expiry}`;
+        }).join("\n"))
         .setFooter({ text: `${list.length} user(s) whitelisted` });
       await interaction.reply({ embeds: [embed], ephemeral: true });
     },

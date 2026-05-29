@@ -8,7 +8,6 @@ export function generateKey(): string {
 export function obfuscateLua(script: string): string {
   const bytes = Buffer.from(script, "utf8");
   const nums = Array.from(bytes).join(",");
-  // Wraps in a byte-array decoder — readable code becomes a number table
   return [
     `local _b={${nums}}`,
     `local _s=""`,
@@ -23,12 +22,13 @@ export function buildLoader(panelName: string, username: string, key: string, ap
     `--// Licensed to: ${username}`,
     `--// Do not share this script`,
     ``,
-    `script_key = "${key}"`,
+    `local script_key = "${key}"`,
     ``,
-    `local _hwid = pcall(function()`,
+    `local ok, _hwid = pcall(function()`,
     `    return game:GetService("RbxAnalyticsService"):GetClientId()`,
-    `end) and game:GetService("RbxAnalyticsService"):GetClientId() or "unknown"`,
+    `end)`,
+    `if not ok then _hwid = "unknown" end`,
     ``,
-    `loadstring(game:HttpGet("${apiBase}/api/loader/${encodeURIComponent(panelName)}?key="..script_key.."&hwid=".._hwid))()`,
+    `loadstring(game:HttpGet("${apiBase}/api/loader/${encodeURIComponent(panelName)}/${encodeURIComponent(key)}?hwid=".._hwid))()`,
   ].join("\n");
 }

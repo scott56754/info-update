@@ -130,6 +130,7 @@ export const panelKeys = pgTable("panel_keys", {
   usedBy: text("used_by"),
   usedAt: timestamp("used_at"),
   active: boolean("active").notNull().default(true),
+  expiresAt: timestamp("expires_at"),
   createdAt: timestamp("created_at").defaultNow(),
 }, (t) => [index("panel_keys_panel_idx").on(t.panelId)]);
 
@@ -141,6 +142,7 @@ export const panelWhitelist = pgTable("panel_whitelist", {
   hwid: text("hwid"),
   whitelistedBy: text("whitelisted_by").notNull(),
   whitelistedAt: timestamp("whitelisted_at").defaultNow(),
+  expiresAt: timestamp("expires_at"),
 }, (t) => [index("whitelist_panel_user_idx").on(t.panelId, t.userId)]);
 
 export const panelBlacklist = pgTable("panel_blacklist", {
@@ -157,6 +159,50 @@ export type Panel = typeof panels.$inferSelect;
 export type PanelKey = typeof panelKeys.$inferSelect;
 export type PanelWhitelist = typeof panelWhitelist.$inferSelect;
 export type PanelBlacklist = typeof panelBlacklist.$inferSelect;
+
+// ── Anti-Nuke Settings ─────────────────────────────────────────────────────
+
+export const antiNukeSettings = pgTable("anti_nuke_settings", {
+  id: serial("id").primaryKey(),
+  guildId: text("guild_id").notNull().unique(),
+  enabled: boolean("enabled").notNull().default(false),
+  punishment: text("punishment").notNull().default("ban"),
+  banThreshold: integer("ban_threshold").notNull().default(3),
+  channelDeleteThreshold: integer("channel_delete_threshold").notNull().default(3),
+  roleDeleteThreshold: integer("role_delete_threshold").notNull().default(3),
+  botAddThreshold: integer("bot_add_threshold").notNull().default(1),
+  timeWindow: integer("time_window").notNull().default(10),
+  logChannelId: text("log_channel_id"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type AntiNukeSettings = typeof antiNukeSettings.$inferSelect;
+
+// ── Giveaways ──────────────────────────────────────────────────────────────
+
+export const giveaways = pgTable("giveaways", {
+  id: serial("id").primaryKey(),
+  guildId: text("guild_id").notNull(),
+  channelId: text("channel_id").notNull(),
+  messageId: text("message_id"),
+  hostId: text("host_id").notNull(),
+  prize: text("prize").notNull(),
+  winnersCount: integer("winners_count").notNull().default(1),
+  endsAt: timestamp("ends_at").notNull(),
+  ended: boolean("ended").notNull().default(false),
+  winnerIds: text("winner_ids"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (t) => [index("giveaways_guild_idx").on(t.guildId)]);
+
+export const giveawayEntries = pgTable("giveaway_entries", {
+  id: serial("id").primaryKey(),
+  giveawayId: integer("giveaway_id").notNull().references(() => giveaways.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull(),
+  enteredAt: timestamp("entered_at").defaultNow(),
+}, (t) => [index("giveaway_entries_idx").on(t.giveawayId, t.userId)]);
+
+export type Giveaway = typeof giveaways.$inferSelect;
+export type GiveawayEntry = typeof giveawayEntries.$inferSelect;
 
 export const insertGuildSettingsSchema = createInsertSchema(guildSettings).omit({ id: true, updatedAt: true });
 export const insertEconomySchema = createInsertSchema(economy).omit({ id: true });

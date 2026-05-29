@@ -1,12 +1,12 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { panels, panelWhitelist, panelBlacklist } from "@workspace/db";
+import { panels, panelWhitelist, panelBlacklist, panelKeys } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { obfuscateLua } from "../bot/utils/obfuscate.js";
 
 const router = Router();
 
-// GET /api/loader/:panelName/:key
+// GET /api/loader/:panelName/:key?hwid=...
 // Called by Roblox executor — returns obfuscated script for whitelisted users
 router.get("/loader/:panelName/:key", async (req, res) => {
   const panelName = req.params.panelName.toLowerCase();
@@ -36,6 +36,11 @@ router.get("/loader/:panelName/:key", async (req, res) => {
       return res.status(403).send(`-- Error: Invalid key or not whitelisted`);
     }
 
+    // Check whitelist expiry
+    if (wl.expiresAt && wl.expiresAt <= new Date()) {
+      return res.status(403).send(`-- Error: Your access has expired. Contact an admin to renew.`);
+    }
+
     // Check blacklist
     const [bl] = await db.select().from(panelBlacklist)
       .where(and(
@@ -46,6 +51,19 @@ router.get("/loader/:panelName/:key", async (req, res) => {
 
     if (bl) {
       return res.status(403).send(`-- Error: You are blacklisted. Reason: ${bl.reason}`);
+    }
+
+    // Check key expiry from panelKeys table
+    const [keyRecord] = await db.select().from(panelKeys)
+      .where(eq(panelKeys.keyCode, key));
+
+    if (keyRecord) {
+      if (!keyRecord.active) {
+        return res.status(403).send(`-- Error: Your key has been revoked.`);
+      }
+      if (keyRecord.expiresAt && keyRecord.expiresAt <= new Date()) {
+        return res.status(403).send(`-- Error: Your key has expired. Contact an admin to renew.`);
+      }
     }
 
     // HWID locking
@@ -74,8 +92,10 @@ router.get("/loader/:panelName/:key", async (req, res) => {
 router.get("/loader/:panelName", async (req, res) => {
   const panelName = req.params.panelName.toLowerCase();
   const key = ((req.query.key as string) || "").toUpperCase();
+  const hwid = ((req.query.hwid as string) || "").trim();
   if (!key) return res.status(400).send(`-- Error: Missing key`);
-  res.redirect(`/api/loader/${encodeURIComponent(panelName)}/${encodeURIComponent(key)}`);
+  const hwidParam = hwid ? `?hwid=${encodeURIComponent(hwid)}` : "";
+  res.redirect(`/api/loader/${encodeURIComponent(panelName)}/${encodeURIComponent(key)}${hwidParam}`);
 });
 
 export default router;
