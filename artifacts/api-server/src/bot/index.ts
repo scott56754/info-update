@@ -5,7 +5,7 @@ import {
 } from "discord.js";
 import { logger } from "../lib/logger.js";
 import { db } from "@workspace/db";
-import { reminders, panels, panelKeys, panelWhitelist, panelBlacklist } from "@workspace/db";
+import { reminders, panels, panelKeys, panelWhitelist, panelBlacklist, guildSettings } from "@workspace/db";
 import { lt, eq, and } from "drizzle-orm";
 
 import { funCommands } from "./commands/fun.js";
@@ -155,6 +155,35 @@ async function setupAndLogin(
       await handlePrefixMessage(message, client).catch(() => {});
     });
   }
+
+  // Welcome message on member join
+  client.on(Events.GuildMemberAdd, async (member) => {
+    try {
+      const [settings] = await db.select().from(guildSettings).where(eq(guildSettings.guildId, member.guild.id));
+      if (!settings?.welcomeChannel || !settings?.welcomeMessage) return;
+
+      const ch = await member.guild.channels.fetch(settings.welcomeChannel).catch(() => null);
+      if (!ch || !ch.isTextBased()) return;
+
+      const msg = settings.welcomeMessage
+        .replace(/{user}/gi, member.toString())
+        .replace(/{server}/gi, member.guild.name)
+        .replace(/{username}/gi, member.user.username)
+        .replace(/{membercount}/gi, member.guild.memberCount.toString());
+
+      const embed = new EmbedBuilder()
+        .setColor(0x5865f2)
+        .setTitle(`👋 Welcome to ${member.guild.name}!`)
+        .setDescription(msg)
+        .setThumbnail(member.user.displayAvatarURL({ size: 256 }))
+        .setFooter({ text: `Member #${member.guild.memberCount}` })
+        .setTimestamp();
+
+      await (ch as any).send({ embeds: [embed] });
+    } catch (err) {
+      logger.error({ err }, "Failed to send welcome message");
+    }
+  });
 
   // Slash commands + button/modal interactions
   client.on(Events.InteractionCreate, async (interaction) => {
