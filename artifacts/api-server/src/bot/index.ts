@@ -162,10 +162,13 @@ async function setupAndLogin(
       const [settings] = await db.select().from(guildSettings).where(eq(guildSettings.guildId, member.guild.id));
       if (!settings) return;
 
-      // Auto-role
+      // Auto-roles (comma-separated IDs)
       if (settings.welcomeAutoRoleId) {
-        const role = member.guild.roles.cache.get(settings.welcomeAutoRoleId);
-        if (role) await member.roles.add(role).catch(() => {});
+        const roleIds = settings.welcomeAutoRoleId.split(",").map((id) => id.trim()).filter(Boolean);
+        for (const roleId of roleIds) {
+          const role = member.guild.roles.cache.get(roleId);
+          if (role) await member.roles.add(role).catch(() => {});
+        }
       }
 
       // Welcome embed in channel

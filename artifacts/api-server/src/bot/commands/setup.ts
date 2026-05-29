@@ -81,12 +81,16 @@ export const setupCommands = [
   {
     data: new SlashCommandBuilder()
       .setName("setwelcome")
-      .setDescription("Set up the welcome system (channel, message, image, auto-role, DM)")
+      .setDescription("Set up the welcome system (channel, message, image, auto-roles, DM)")
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
       .addChannelOption((o) => o.setName("channel").setDescription("Channel to send welcome messages in").setRequired(true).addChannelTypes(ChannelType.GuildText))
       .addStringOption((o) => o.setName("message").setDescription("Message — use {user} {username} {server} {membercount}").setRequired(true))
+      .addRoleOption((o) => o.setName("autorole1").setDescription("Role 1 given on join (optional)").setRequired(false))
+      .addRoleOption((o) => o.setName("autorole2").setDescription("Role 2 given on join (optional)").setRequired(false))
+      .addRoleOption((o) => o.setName("autorole3").setDescription("Role 3 given on join (optional)").setRequired(false))
+      .addRoleOption((o) => o.setName("autorole4").setDescription("Role 4 given on join (optional)").setRequired(false))
+      .addRoleOption((o) => o.setName("autorole5").setDescription("Role 5 given on join (optional)").setRequired(false))
       .addStringOption((o) => o.setName("image").setDescription("Banner image/GIF URL shown in the embed (optional)").setRequired(false))
-      .addRoleOption((o) => o.setName("autorole").setDescription("Role automatically given when someone joins (optional)").setRequired(false))
       .addStringOption((o) => o.setName("dm").setDescription("DM message sent to the new member — uses same placeholders (optional)").setRequired(false))
       .addStringOption((o) => o.setName("color").setDescription("Embed color hex, e.g. #5865F2 (optional, default blurple)").setRequired(false)),
     async execute(interaction: ChatInputCommandInteraction) {
@@ -94,9 +98,12 @@ export const setupCommands = [
       const channel = interaction.options.getChannel("channel", true);
       const message = interaction.options.getString("message", true);
       const image = interaction.options.getString("image");
-      const autoRole = interaction.options.getRole("autorole");
       const dmMsg = interaction.options.getString("dm");
       const colorInput = interaction.options.getString("color");
+
+      const roleIds = [1, 2, 3, 4, 5]
+        .map((n) => interaction.options.getRole(`autorole${n}`)?.id)
+        .filter(Boolean) as string[];
 
       const colorHex = colorInput?.replace("#", "").trim() ?? null;
 
@@ -104,7 +111,7 @@ export const setupCommands = [
         welcomeChannel: channel.id,
         welcomeMessage: message,
         welcomeImageUrl: image ?? null,
-        welcomeAutoRoleId: autoRole?.id ?? null,
+        welcomeAutoRoleId: roleIds.length ? roleIds.join(",") : null,
         welcomeDmMessage: dmMsg ?? null,
         welcomeColor: colorHex,
       });
@@ -174,44 +181,57 @@ export const setupCommands = [
       .setName("autorole")
       .setDescription("Set, remove, or check the auto-role given to every new member")
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-      .addSubcommand((s) => s.setName("set").setDescription("Set the auto-role")
-        .addRoleOption((o) => o.setName("role").setDescription("Role to give on join").setRequired(true)))
-      .addSubcommand((s) => s.setName("remove").setDescription("Remove the auto-role"))
-      .addSubcommand((s) => s.setName("check").setDescription("Show the current auto-role")),
+      .addSubcommand((s) => s.setName("set").setDescription("Set up to 5 roles given automatically on join")
+        .addRoleOption((o) => o.setName("role1").setDescription("Role 1").setRequired(true))
+        .addRoleOption((o) => o.setName("role2").setDescription("Role 2 (optional)").setRequired(false))
+        .addRoleOption((o) => o.setName("role3").setDescription("Role 3 (optional)").setRequired(false))
+        .addRoleOption((o) => o.setName("role4").setDescription("Role 4 (optional)").setRequired(false))
+        .addRoleOption((o) => o.setName("role5").setDescription("Role 5 (optional)").setRequired(false)))
+      .addSubcommand((s) => s.setName("remove").setDescription("Remove all auto-roles"))
+      .addSubcommand((s) => s.setName("check").setDescription("Show all current auto-roles")),
     async execute(interaction: ChatInputCommandInteraction) {
       if (!ownerOnly(interaction)) return;
       const sub = interaction.options.getSubcommand();
 
       if (sub === "set") {
-        const role = interaction.options.getRole("role", true);
         const botMember = interaction.guild!.members.me!;
         if (!botMember.permissions.has(PermissionFlagsBits.ManageRoles)) {
           return interaction.reply({ content: "❌ I need the **Manage Roles** permission to assign roles.", ephemeral: true });
         }
-        if (role.position >= botMember.roles.highest.position) {
-          return interaction.reply({ content: `❌ I can't assign **${role.name}** — it's higher than or equal to my highest role.`, ephemeral: true });
+
+        const roles = [1, 2, 3, 4, 5]
+          .map((n) => interaction.options.getRole(`role${n}`))
+          .filter(Boolean);
+
+        const blocked = roles.filter((r) => r!.position >= botMember.roles.highest.position);
+        if (blocked.length) {
+          return interaction.reply({ content: `❌ Can't assign: ${blocked.map((r) => `**${r!.name}**`).join(", ")} — too high for me.`, ephemeral: true });
         }
-        await upsertSettings(interaction.guildId!, { welcomeAutoRoleId: role.id });
+
+        const roleIds = roles.map((r) => r!.id).join(",");
+        await upsertSettings(interaction.guildId!, { welcomeAutoRoleId: roleIds });
+
         return interaction.reply({
           embeds: [setupEmbed(0x57f287)
-            .setTitle("✅ Auto-Role Set")
-            .setDescription(`Every new member will automatically receive ${role} when they join.`)
-            .setFooter({ text: "Requires Server Members Intent to be enabled in Discord Developer Portal → Bot" })],
+            .setTitle("✅ Auto-Roles Set")
+            .setDescription(`New members will receive: ${roles.map((r) => `${r}`).join(", ")}`)
+            .setFooter({ text: "Requires Server Members Intent — Discord Developer Portal → Bot → Privileged Gateway Intents" })],
         });
       }
 
       if (sub === "remove") {
         await upsertSettings(interaction.guildId!, { welcomeAutoRoleId: null });
         return interaction.reply({
-          embeds: [setupEmbed(0xed4245).setTitle("🗑️ Auto-Role Removed").setDescription("New members will no longer be given a role on join.")],
+          embeds: [setupEmbed(0xed4245).setTitle("🗑️ Auto-Roles Cleared").setDescription("New members will no longer receive any roles on join.")],
         });
       }
 
       // check
       const [s] = await db.select().from(guildSettings).where(eq(guildSettings.guildId, interaction.guildId!));
-      const roleText = s?.welcomeAutoRoleId ? `<@&${s.welcomeAutoRoleId}>` : "❌ Not set";
+      const roleIds = s?.welcomeAutoRoleId ? s.welcomeAutoRoleId.split(",") : [];
+      const roleText = roleIds.length ? roleIds.map((id) => `<@&${id}>`).join("\n") : "❌ None set";
       return interaction.reply({
-        embeds: [setupEmbed(0x5865f2).setTitle("⚙️ Auto-Role").addFields({ name: "Current Role", value: roleText })],
+        embeds: [setupEmbed(0x5865f2).setTitle("⚙️ Auto-Roles").addFields({ name: `${roleIds.length} Role(s)`, value: roleText })],
         ephemeral: true,
       });
     },
