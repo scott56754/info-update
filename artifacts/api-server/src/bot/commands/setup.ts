@@ -171,6 +171,53 @@ export const setupCommands = [
   },
   {
     data: new SlashCommandBuilder()
+      .setName("autorole")
+      .setDescription("Set, remove, or check the auto-role given to every new member")
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+      .addSubcommand((s) => s.setName("set").setDescription("Set the auto-role")
+        .addRoleOption((o) => o.setName("role").setDescription("Role to give on join").setRequired(true)))
+      .addSubcommand((s) => s.setName("remove").setDescription("Remove the auto-role"))
+      .addSubcommand((s) => s.setName("check").setDescription("Show the current auto-role")),
+    async execute(interaction: ChatInputCommandInteraction) {
+      if (!ownerOnly(interaction)) return;
+      const sub = interaction.options.getSubcommand();
+
+      if (sub === "set") {
+        const role = interaction.options.getRole("role", true);
+        const botMember = interaction.guild!.members.me!;
+        if (!botMember.permissions.has(PermissionFlagsBits.ManageRoles)) {
+          return interaction.reply({ content: "❌ I need the **Manage Roles** permission to assign roles.", ephemeral: true });
+        }
+        if (role.position >= botMember.roles.highest.position) {
+          return interaction.reply({ content: `❌ I can't assign **${role.name}** — it's higher than or equal to my highest role.`, ephemeral: true });
+        }
+        await upsertSettings(interaction.guildId!, { welcomeAutoRoleId: role.id });
+        return interaction.reply({
+          embeds: [setupEmbed(0x57f287)
+            .setTitle("✅ Auto-Role Set")
+            .setDescription(`Every new member will automatically receive ${role} when they join.`)
+            .setFooter({ text: "Requires Server Members Intent to be enabled in Discord Developer Portal → Bot" })],
+        });
+      }
+
+      if (sub === "remove") {
+        await upsertSettings(interaction.guildId!, { welcomeAutoRoleId: null });
+        return interaction.reply({
+          embeds: [setupEmbed(0xed4245).setTitle("🗑️ Auto-Role Removed").setDescription("New members will no longer be given a role on join.")],
+        });
+      }
+
+      // check
+      const [s] = await db.select().from(guildSettings).where(eq(guildSettings.guildId, interaction.guildId!));
+      const roleText = s?.welcomeAutoRoleId ? `<@&${s.welcomeAutoRoleId}>` : "❌ Not set";
+      return interaction.reply({
+        embeds: [setupEmbed(0x5865f2).setTitle("⚙️ Auto-Role").addFields({ name: "Current Role", value: roleText })],
+        ephemeral: true,
+      });
+    },
+  },
+  {
+    data: new SlashCommandBuilder()
       .setName("setupverification")
       .setDescription("Set up verification role and channel")
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
