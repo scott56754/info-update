@@ -6,60 +6,76 @@ import { obfuscateLua } from "../bot/utils/obfuscate.js";
 
 const router = Router();
 
-// GET /api/loader/:panelName?key=XXX&hwid=XXX
-// Returns obfuscated Lua script for whitelisted users
+// GET /api/loader/:panelName/:key
+// Called by Roblox executor — returns obfuscated script for whitelisted users
+router.get("/loader/:panelName/:key", async (req, res) => {
+  const panelName = req.params.panelName.toLowerCase();
+  const key = req.params.key.toUpperCase();
+  const hwid = (req.query.hwid as string | undefined)?.trim() || null;
+
+  try {
+    const [panel] = await db.select().from(panels)
+      .where(eq(panels.name, panelName));
+
+    if (!panel) {
+      return res.status(404).send(`-- Error: Panel not found`);
+    }
+
+    if (!panel.scriptContent) {
+      return res.status(404).send(`-- Error: No script configured for this panel`);
+    }
+
+    // Verify whitelist entry with matching key
+    const [wl] = await db.select().from(panelWhitelist)
+      .where(and(
+        eq(panelWhitelist.panelId, panel.id),
+        eq(panelWhitelist.keyCode, key),
+      ));
+
+    if (!wl) {
+      return res.status(403).send(`-- Error: Invalid key or not whitelisted`);
+    }
+
+    // Check blacklist
+    const [bl] = await db.select().from(panelBlacklist)
+      .where(and(
+        eq(panelBlacklist.panelId, panel.id),
+        eq(panelBlacklist.userId, wl.userId),
+        eq(panelBlacklist.active, true),
+      ));
+
+    if (bl) {
+      return res.status(403).send(`-- Error: You are blacklisted. Reason: ${bl.reason}`);
+    }
+
+    // HWID locking
+    if (hwid && hwid !== "unknown") {
+      if (wl.hwid && wl.hwid !== hwid) {
+        return res.status(403).send(`-- Error: HWID mismatch. Reset your HWID via the panel in Discord.`);
+      }
+      if (!wl.hwid) {
+        await db.update(panelWhitelist)
+          .set({ hwid })
+          .where(eq(panelWhitelist.id, wl.id));
+      }
+    }
+
+    // Return obfuscated script
+    const obfuscated = obfuscateLua(panel.scriptContent);
+    res.setHeader("Content-Type", "text/plain");
+    res.setHeader("Cache-Control", "no-store");
+    return res.send(obfuscated);
+  } catch (err) {
+    return res.status(500).send(`-- Error: Internal server error`);
+  }
+});
+
+// Legacy route with query params (fallback)
 router.get("/loader/:panelName", async (req, res) => {
-  const { panelName } = req.params;
-  const { key, hwid } = req.query as { key?: string; hwid?: string };
-
-  if (!key || !hwid) {
-    return res.status(400).send('-- Error: Missing key or hwid parameter');
-  }
-
-  const [panel] = await db.select().from(panels)
-    .where(eq(panels.name, panelName.toLowerCase()));
-
-  if (!panel) {
-    return res.status(404).send('-- Error: Panel not found');
-  }
-
-  if (!panel.scriptContent) {
-    return res.status(404).send('-- Error: No script configured for this panel');
-  }
-
-  // Check blacklist
-  const [bl] = await db.select().from(panelBlacklist)
-    .where(and(
-      eq(panelBlacklist.panelId, panel.id),
-      eq(panelBlacklist.active, true)
-    ));
-
-  // Check whitelist + key match
-  const [wl] = await db.select().from(panelWhitelist)
-    .where(and(
-      eq(panelWhitelist.panelId, panel.id),
-      eq(panelWhitelist.keyCode, key.toUpperCase())
-    ));
-
-  if (!wl) {
-    return res.status(403).send('-- Error: Not whitelisted or invalid key');
-  }
-
-  // HWID lock
-  if (wl.hwid && wl.hwid !== hwid) {
-    return res.status(403).send('-- Error: HWID mismatch. Reset your HWID via the panel.');
-  }
-
-  // Lock HWID if not set
-  if (!wl.hwid && hwid !== "unknown") {
-    await db.update(panelWhitelist)
-      .set({ hwid })
-      .where(eq(panelWhitelist.id, wl.id));
-  }
-
-  const obfuscated = obfuscateLua(panel.scriptContent);
-  res.setHeader("Content-Type", "text/plain");
-  res.send(obfuscated);
+  const panelName = req.params.panelName.toLowerCase();
+  const key = ((req.query.key as string) || "").toUpperCase();
+  if (!key) return res.status(400).send(`-- Error: Missing key`);
+  res.redirect(`/api/loader/${encodeURIComponent(panelName)}/${encodeURIComponent(key)}`);
 });
 
 export default router;

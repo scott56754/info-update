@@ -51,13 +51,19 @@ export async function startBot() {
     ],
   });
 
-  // Register slash commands
+  // Register slash commands — try guild first, fall back to global
   try {
     const rest = new REST().setToken(token);
     const commandData = allCommands.map((c) => c.data.toJSON());
     if (guildId) {
-      await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: commandData });
-      logger.info({ count: commandData.length }, "Registered guild slash commands");
+      try {
+        await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: commandData });
+        logger.info({ count: commandData.length }, "Registered guild slash commands");
+      } catch (guildErr: any) {
+        logger.warn({ code: guildErr?.code }, "Guild command registration failed — falling back to global commands");
+        await rest.put(Routes.applicationCommands(clientId), { body: commandData });
+        logger.info({ count: commandData.length }, "Registered global slash commands (fallback)");
+      }
     } else {
       await rest.put(Routes.applicationCommands(clientId), { body: commandData });
       logger.info({ count: commandData.length }, "Registered global slash commands");
@@ -150,25 +156,27 @@ export async function startBot() {
             .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, userId)));
         }
 
-        // Build obfuscated script file
-        const obfuscated = obfuscateLua(panel.scriptContent);
-        const fullScript = `--// Light Hub | Project: ${panelName}\n--// Licensed to: ${interaction.user.tag}\nscript_key = "${userKey}"\n\n${obfuscated}`;
-        const buf = Buffer.from(fullScript, "utf8");
-        const file = new AttachmentBuilder(buf, { name: `${panelName}.lua` });
+        // Build the loader URL using the Replit dev domain
+        const domain = process.env.REPLIT_DEV_DOMAIN
+          ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+          : `http://localhost:${process.env.PORT ?? 8080}`;
+        const loaderUrl = `${domain}/api/loader/${encodeURIComponent(panelName)}/${encodeURIComponent(userKey)}`;
+
+        // Send script as code block in channel (ephemeral), NOT as file or DM
+        const scriptBlock = `script_key="${userKey}";\nloadstring(game:HttpGet("${loaderUrl}"))()`;
 
         await interaction.reply({
-          content: `📜 **${panelName}** — Your script is attached below.\nYour key has been sent to your DMs.`,
-          files: [file],
+          content: `Here is your script:\n\`\`\`lua\n${scriptBlock}\n\`\`\``,
           ephemeral: true,
         });
 
-        // Send key to DMs
+        // Send ONLY the key to DMs (not the script source)
         try {
           const dmEmbed = new EmbedBuilder().setColor(0x5865f2)
             .setTitle(`🔑 Your Script Key — ${panelName}`)
             .setDescription(`\`\`\`\n${userKey}\n\`\`\``)
             .addFields({ name: "Panel", value: panelName, inline: true })
-            .setFooter({ text: "Do not share this key with anyone." })
+            .setFooter({ text: "Do not share this key. Use it in the loader script." })
             .setTimestamp();
           await interaction.user.send({ embeds: [dmEmbed] });
         } catch {}
