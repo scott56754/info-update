@@ -256,22 +256,20 @@ async function handlePanelButton(interaction: any, client: Client, action: strin
       ? `https://${process.env.REPLIT_DEV_DOMAIN}`
       : `http://localhost:${process.env.PORT ?? 8080}`;
 
-    const scriptBlock = buildLoader(panelName, interaction.user.username, userKey, domain);
+    const loaderUrl = `${domain}/api/loader/${encodeURIComponent(panelName)}/${encodeURIComponent(userKey)}`;
+    const scriptBlock = `script_key="${userKey}";\nloadstring(game:HttpGet("${loaderUrl}"))()`;
 
-    await interaction.reply({
-      content: `Here is your script loader. Paste this into your executor:\n\`\`\`lua\n${scriptBlock}\n\`\`\``,
-      ephemeral: true,
-    });
+    await interaction.reply({ content: `Here is your script:\n\`\`\`lua\n${scriptBlock}\n\`\`\``, ephemeral: true });
 
     try {
       await interaction.user.send({
-        embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle(`🔑 Your Script — ${panelName}`)
-          .setDescription(`\`\`\`lua\n${scriptBlock}\n\`\`\``)
+        embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle(`🔑 Your Script Key — ${panelName}`)
+          .setDescription(`\`\`\`\n${userKey}\n\`\`\``)
           .addFields(
             { name: "Panel", value: panelName, inline: true },
             { name: "Expires", value: wl.expiresAt ? `<t:${Math.floor(wl.expiresAt.getTime() / 1000)}:R>` : "Never", inline: true },
           )
-          .setFooter({ text: "Do not share this script." }).setTimestamp()],
+          .setFooter({ text: "Do not share this key." }).setTimestamp()],
       });
     } catch {}
     return;
@@ -280,12 +278,13 @@ async function handlePanelButton(interaction: any, client: Client, action: strin
   if (action === "role") {
     if (!wl) return interaction.reply({ content: "❌ You are not whitelisted — redeem a key first.", ephemeral: true });
     if (!panel.roleId) return interaction.reply({ content: "⚠️ No role configured for this panel. Contact an admin.", ephemeral: true });
+    await interaction.deferReply({ ephemeral: true });
     try {
       const member = await interaction.guild.members.fetch(userId);
       await member.roles.add(panel.roleId);
-      await interaction.reply({ content: `✅ You have been given the <@&${panel.roleId}> role!`, ephemeral: true });
+      await interaction.editReply({ content: `✅ You have been given the <@&${panel.roleId}> role!` });
     } catch {
-      await interaction.reply({ content: "⚠️ Role assignment is managed by admins. Contact support if you are missing your role.", ephemeral: true });
+      await interaction.editReply({ content: "⚠️ Role assignment is managed by admins. Contact support if you are missing your role." });
     }
     return;
   }

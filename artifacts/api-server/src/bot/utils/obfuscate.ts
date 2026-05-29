@@ -22,13 +22,12 @@ export function buildLoader(panelName: string, username: string, key: string, ap
     `--// Licensed to: ${username}`,
     `--// Do not share this script`,
     ``,
-    `local script_key = "${key}"`,
+    `script_key = "${key}"`,
     ``,
-    `local ok, _hwid = pcall(function()`,
+    `local _hwid = pcall(function()`,
     `    return game:GetService("RbxAnalyticsService"):GetClientId()`,
-    `end)`,
-    `if not ok then _hwid = "unknown" end`,
+    `end) and game:GetService("RbxAnalyticsService"):GetClientId() or "unknown"`,
     ``,
-    `loadstring(game:HttpGet("${apiBase}/api/loader/${encodeURIComponent(panelName)}/${encodeURIComponent(key)}?hwid=".._hwid))()`,
+    `loadstring(game:HttpGet("${apiBase}/api/loader/${encodeURIComponent(panelName)}?key="..script_key.."&hwid=".._hwid))()`,
   ].join("\n");
 }
