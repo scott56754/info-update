@@ -572,6 +572,146 @@ export const panelCommands = [
   },
   {
     data: new SlashCommandBuilder()
+      .setName("addrole")
+      .setDescription("Add a role to a user")
+      .addUserOption((o) => o.setName("user").setDescription("User to give the role to").setRequired(true))
+      .addRoleOption((o) => o.setName("role").setDescription("Role to assign").setRequired(true))
+      .addStringOption((o) => o.setName("reason").setDescription("Reason (optional)").setRequired(false)),
+    async execute(interaction: ChatInputCommandInteraction) {
+      if (!ownerOnly(interaction)) return;
+      const target = interaction.options.getUser("user", true);
+      const role = interaction.options.getRole("role", true);
+      const reason = interaction.options.getString("reason") ?? "No reason provided";
+
+      const guild = interaction.guild!;
+      const member = await guild.members.fetch(target.id).catch(() => null);
+      if (!member) return interaction.reply({ content: "❌ That user is not in this server.", ephemeral: true });
+
+      const botMember = guild.members.me!;
+      if (!botMember.permissions.has(PermissionFlagsBits.ManageRoles)) {
+        return interaction.reply({ content: "❌ I don't have the **Manage Roles** permission.", ephemeral: true });
+      }
+      if (role.position >= botMember.roles.highest.position) {
+        return interaction.reply({ content: `❌ I can't assign **${role.name}** — it's higher than or equal to my highest role.`, ephemeral: true });
+      }
+      if (member.roles.cache.has(role.id)) {
+        return interaction.reply({ content: `⚠️ ${target} already has the **${role.name}** role.`, ephemeral: true });
+      }
+
+      await member.roles.add(role.id, reason);
+
+      const embed = new EmbedBuilder()
+        .setColor(0x57f287)
+        .setTitle("✅ Role Added")
+        .addFields(
+          { name: "User", value: `${target} (\`${target.id}\`)`, inline: true },
+          { name: "Role", value: `${role}`, inline: true },
+          { name: "Assigned By", value: `${interaction.user}`, inline: true },
+          { name: "Reason", value: reason, inline: false },
+        )
+        .setTimestamp();
+
+      await interaction.reply({ embeds: [embed], ephemeral: true });
+    },
+  },
+  {
+    data: new SlashCommandBuilder()
+      .setName("removerole")
+      .setDescription("Remove a role from a user")
+      .addUserOption((o) => o.setName("user").setDescription("User to remove the role from").setRequired(true))
+      .addRoleOption((o) => o.setName("role").setDescription("Role to remove").setRequired(true))
+      .addStringOption((o) => o.setName("reason").setDescription("Reason (optional)").setRequired(false)),
+    async execute(interaction: ChatInputCommandInteraction) {
+      if (!ownerOnly(interaction)) return;
+      const target = interaction.options.getUser("user", true);
+      const role = interaction.options.getRole("role", true);
+      const reason = interaction.options.getString("reason") ?? "No reason provided";
+
+      const guild = interaction.guild!;
+      const member = await guild.members.fetch(target.id).catch(() => null);
+      if (!member) return interaction.reply({ content: "❌ That user is not in this server.", ephemeral: true });
+
+      const botMember = guild.members.me!;
+      if (!botMember.permissions.has(PermissionFlagsBits.ManageRoles)) {
+        return interaction.reply({ content: "❌ I don't have the **Manage Roles** permission.", ephemeral: true });
+      }
+      if (role.position >= botMember.roles.highest.position) {
+        return interaction.reply({ content: `❌ I can't remove **${role.name}** — it's higher than or equal to my highest role.`, ephemeral: true });
+      }
+      if (!member.roles.cache.has(role.id)) {
+        return interaction.reply({ content: `⚠️ ${target} doesn't have the **${role.name}** role.`, ephemeral: true });
+      }
+
+      await member.roles.remove(role.id, reason);
+
+      const embed = new EmbedBuilder()
+        .setColor(0xed4245)
+        .setTitle("🗑️ Role Removed")
+        .addFields(
+          { name: "User", value: `${target} (\`${target.id}\`)`, inline: true },
+          { name: "Role", value: `${role}`, inline: true },
+          { name: "Removed By", value: `${interaction.user}`, inline: true },
+          { name: "Reason", value: reason, inline: false },
+        )
+        .setTimestamp();
+
+      await interaction.reply({ embeds: [embed], ephemeral: true });
+    },
+  },
+  {
+    data: new SlashCommandBuilder()
+      .setName("forcehwidreset")
+      .setDescription("Force-reset the HWID lock for a user on a panel")
+      .addStringOption((o) => o.setName("panel").setDescription("Panel name").setRequired(true))
+      .addUserOption((o) => o.setName("user").setDescription("User whose HWID to reset").setRequired(false))
+      .addStringOption((o) => o.setName("userid").setDescription("User ID (if they left the server)").setRequired(false)),
+    async execute(interaction: ChatInputCommandInteraction) {
+      if (!ownerOnly(interaction)) return;
+      const panelName = interaction.options.getString("panel", true).toLowerCase().trim();
+      const targetUser = interaction.options.getUser("user");
+      const rawId = interaction.options.getString("userid");
+
+      const userId = targetUser?.id ?? rawId?.trim();
+      if (!userId) return interaction.reply({ content: "❌ Provide either a `user` or a `userid`.", ephemeral: true });
+
+      await interaction.deferReply({ ephemeral: true });
+
+      const panel = await getPanel(interaction.guildId!, panelName);
+      if (!panel) return interaction.editReply({ content: `❌ Panel **${panelName}** not found.` });
+
+      const [wl] = await db.select().from(panelWhitelist)
+        .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, userId)));
+
+      if (!wl) {
+        return interaction.editReply({ content: `❌ No whitelist entry found for that user on panel **${panelName}**.` });
+      }
+
+      if (!wl.hwid) {
+        return interaction.editReply({ content: `⚠️ That user has no HWID locked on **${panelName}** — nothing to reset.` });
+      }
+
+      const oldHwid = wl.hwid;
+      await db.update(panelWhitelist)
+        .set({ hwid: null })
+        .where(eq(panelWhitelist.id, wl.id));
+
+      const embed = new EmbedBuilder()
+        .setColor(0xfee75c)
+        .setTitle("⚙️ HWID Force Reset")
+        .addFields(
+          { name: "Panel", value: `\`${panelName}\``, inline: true },
+          { name: "User", value: targetUser ? `${targetUser} (\`${userId}\`)` : `\`${userId}\``, inline: true },
+          { name: "Reset By", value: `${interaction.user}`, inline: true },
+          { name: "Old HWID", value: `\`${oldHwid.slice(0, 20)}…\``, inline: false },
+        )
+        .setDescription("The user's HWID lock has been cleared. They can now lock in from any device on their next script execution.")
+        .setTimestamp();
+
+      await interaction.editReply({ embeds: [embed] });
+    },
+  },
+  {
+    data: new SlashCommandBuilder()
       .setName("listpanels")
       .setDescription("List all panels in this server"),
     async execute(interaction: ChatInputCommandInteraction) {

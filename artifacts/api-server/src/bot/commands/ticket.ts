@@ -218,7 +218,8 @@ export async function handleTicketButton(interaction: ButtonInteraction, client:
   };
 
   const staffRoleId = staffRoles[type];
-  const channelName = `ticket-${typeLabels[type].replace(/[^a-z0-9]/gi, "-").toLowerCase().slice(0, 30)}-${interaction.user.username.slice(0, 10)}`;
+  const label = typeLabels[type] ?? type;
+  const channelName = `ticket-${label.replace(/[^a-z0-9]/gi, "-").toLowerCase().slice(0, 30)}-${interaction.user.username.slice(0, 10)}`;
 
   // Permission overwrites: deny everyone, allow user + staff role
   const permissionOverwrites: any[] = [
