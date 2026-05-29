@@ -14,7 +14,7 @@ import { economyCommands } from "./commands/economy.js";
 import { infoCommands } from "./commands/info.js";
 import { utilityCommands } from "./commands/utility.js";
 import { musicCommands } from "./commands/music.js";
-import { setupCommands } from "./commands/setup.js";
+import { setupCommands, buildWelcomeEmbed, replacePlaceholders } from "./commands/setup.js";
 import { panelCommands } from "./commands/panel.js";
 import { ticketCommands, handleTicketButton, handleCloseTicket } from "./commands/ticket.js";
 import { giveawayCommands, handleGiveawayButton, startGiveawayLoop } from "./commands/giveaway.js";
@@ -156,30 +156,39 @@ async function setupAndLogin(
     });
   }
 
-  // Welcome message on member join
+  // Welcome message + auto-role + DM on member join
   client.on(Events.GuildMemberAdd, async (member) => {
     try {
       const [settings] = await db.select().from(guildSettings).where(eq(guildSettings.guildId, member.guild.id));
-      if (!settings?.welcomeChannel || !settings?.welcomeMessage) return;
+      if (!settings) return;
 
-      const ch = await member.guild.channels.fetch(settings.welcomeChannel).catch(() => null);
-      if (!ch || !ch.isTextBased()) return;
+      // Auto-role
+      if (settings.welcomeAutoRoleId) {
+        const role = member.guild.roles.cache.get(settings.welcomeAutoRoleId);
+        if (role) await member.roles.add(role).catch(() => {});
+      }
 
-      const msg = settings.welcomeMessage
-        .replace(/{user}/gi, member.toString())
-        .replace(/{server}/gi, member.guild.name)
-        .replace(/{username}/gi, member.user.username)
-        .replace(/{membercount}/gi, member.guild.memberCount.toString());
+      // Welcome embed in channel
+      if (settings.welcomeChannel && settings.welcomeMessage) {
+        const ch = await member.guild.channels.fetch(settings.welcomeChannel).catch(() => null);
+        if (ch?.isTextBased()) {
+          const embed = buildWelcomeEmbed(settings, member, member.guild);
+          await (ch as any).send({ embeds: [embed] });
+        }
+      }
 
-      const embed = new EmbedBuilder()
-        .setColor(0x5865f2)
-        .setTitle(`👋 Welcome to ${member.guild.name}!`)
-        .setDescription(msg)
-        .setThumbnail(member.user.displayAvatarURL({ size: 256 }))
-        .setFooter({ text: `Member #${member.guild.memberCount}` })
-        .setTimestamp();
-
-      await (ch as any).send({ embeds: [embed] });
+      // DM the new member
+      if (settings.welcomeDmMessage) {
+        const dmText = replacePlaceholders(settings.welcomeDmMessage, member, member.guild);
+        const color = parseInt(settings.welcomeColor?.replace("#", "") ?? "5865f2", 16) || 0x5865f2;
+        const dmEmbed = new EmbedBuilder()
+          .setColor(color)
+          .setTitle(`👋 Welcome to ${member.guild.name}!`)
+          .setDescription(dmText)
+          .setThumbnail(member.guild.iconURL({ size: 256 }) ?? null)
+          .setTimestamp();
+        await member.user.send({ embeds: [dmEmbed] }).catch(() => {});
+      }
     } catch (err) {
       logger.error({ err }, "Failed to send welcome message");
     }

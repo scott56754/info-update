@@ -19,6 +19,28 @@ function setupEmbed(color: number) {
   return new EmbedBuilder().setColor(color).setTimestamp();
 }
 
+export function replacePlaceholders(text: string, member: GuildMember, guild: { name: string; memberCount: number }) {
+  return text
+    .replace(/{user}/gi, member.toString())
+    .replace(/{username}/gi, member.user.username)
+    .replace(/{server}/gi, guild.name)
+    .replace(/{membercount}/gi, guild.memberCount.toString());
+}
+
+export function buildWelcomeEmbed(settings: { welcomeMessage: string | null; welcomeImageUrl?: string | null; welcomeColor?: string | null }, member: GuildMember, guild: { name: string; memberCount: number }) {
+  const color = parseInt(settings.welcomeColor?.replace("#", "") ?? "5865f2", 16) || 0x5865f2;
+  const msg = replacePlaceholders(settings.welcomeMessage ?? "", member, guild);
+  const embed = new EmbedBuilder()
+    .setColor(color)
+    .setTitle(`👋 Welcome to ${guild.name}!`)
+    .setDescription(msg)
+    .setThumbnail(member.user.displayAvatarURL({ size: 256 }))
+    .setFooter({ text: `Member #${guild.memberCount}` })
+    .setTimestamp();
+  if (settings.welcomeImageUrl) embed.setImage(settings.welcomeImageUrl);
+  return embed;
+}
+
 async function upsertSettings(guildId: string, patch: Partial<typeof guildSettings.$inferInsert>) {
   const [existing] = await db.select().from(guildSettings).where(eq(guildSettings.guildId, guildId));
   if (existing) {
@@ -59,45 +81,92 @@ export const setupCommands = [
   {
     data: new SlashCommandBuilder()
       .setName("setwelcome")
-      .setDescription("Set the welcome channel and message")
+      .setDescription("Set up the welcome system (channel, message, image, auto-role, DM)")
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-      .addChannelOption((o) => o.setName("channel").setDescription("Welcome channel").setRequired(true).addChannelTypes(ChannelType.GuildText))
-      .addStringOption((o) => o.setName("message").setDescription("Welcome message (use {user} and {server})").setRequired(true)),
+      .addChannelOption((o) => o.setName("channel").setDescription("Channel to send welcome messages in").setRequired(true).addChannelTypes(ChannelType.GuildText))
+      .addStringOption((o) => o.setName("message").setDescription("Message — use {user} {username} {server} {membercount}").setRequired(true))
+      .addStringOption((o) => o.setName("image").setDescription("Banner image/GIF URL shown in the embed (optional)").setRequired(false))
+      .addRoleOption((o) => o.setName("autorole").setDescription("Role automatically given when someone joins (optional)").setRequired(false))
+      .addStringOption((o) => o.setName("dm").setDescription("DM message sent to the new member — uses same placeholders (optional)").setRequired(false))
+      .addStringOption((o) => o.setName("color").setDescription("Embed color hex, e.g. #5865F2 (optional, default blurple)").setRequired(false)),
     async execute(interaction: ChatInputCommandInteraction) {
       if (!ownerOnly(interaction)) return;
       const channel = interaction.options.getChannel("channel", true);
       const message = interaction.options.getString("message", true);
-      await upsertSettings(interaction.guildId!, { welcomeChannel: channel.id, welcomeMessage: message });
-      await interaction.reply({ embeds: [setupEmbed(0x57f287).setTitle("⚙️ Welcome Set").addFields({ name: "Channel", value: `${channel}`, inline: true }, { name: "Message", value: message })] });
+      const image = interaction.options.getString("image");
+      const autoRole = interaction.options.getRole("autorole");
+      const dmMsg = interaction.options.getString("dm");
+      const colorInput = interaction.options.getString("color");
+
+      const colorHex = colorInput?.replace("#", "").trim() ?? null;
+
+      await upsertSettings(interaction.guildId!, {
+        welcomeChannel: channel.id,
+        welcomeMessage: message,
+        welcomeImageUrl: image ?? null,
+        welcomeAutoRoleId: autoRole?.id ?? null,
+        welcomeDmMessage: dmMsg ?? null,
+        welcomeColor: colorHex,
+      });
+
+      const embed = setupEmbed(0x57f287)
+        .setTitle("⚙️ Welcome System Configured")
+        .addFields(
+          { name: "Channel", value: `${channel}`, inline: true },
+          { name: "Auto-Role", value: autoRole ? `${autoRole}` : "None", inline: true },
+          { name: "DM on Join", value: dmMsg ? "✅ Enabled" : "❌ Off", inline: true },
+          { name: "Message", value: `\`\`\`${message}\`\`\``, inline: false },
+        )
+        .setFooter({ text: "Placeholders: {user} {username} {server} {membercount}" });
+      if (image) embed.setImage(image);
+      await interaction.reply({ embeds: [embed] });
     },
   },
   {
     data: new SlashCommandBuilder()
       .setName("testwelcome")
-      .setDescription("Test the welcome message")
+      .setDescription("Preview the welcome message as if you just joined")
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
     async execute(interaction: ChatInputCommandInteraction) {
       if (!ownerOnly(interaction)) return;
       const [settings] = await db.select().from(guildSettings).where(eq(guildSettings.guildId, interaction.guildId!));
       if (!settings?.welcomeChannel || !settings?.welcomeMessage) {
-        return interaction.reply({ content: "❌ Welcome channel/message not configured. Use `/setwelcome` first.", ephemeral: true });
+        return interaction.reply({ content: "❌ Welcome not configured. Use `/setwelcome` first.", ephemeral: true });
       }
       const ch = await interaction.guild!.channels.fetch(settings.welcomeChannel).catch(() => null);
-      if (!ch || !ch.isTextBased()) return interaction.reply({ content: "❌ Welcome channel not found.", ephemeral: true });
-      const msg = settings.welcomeMessage.replace("{user}", interaction.user.toString()).replace("{server}", interaction.guild!.name);
-      await (ch as any).send({ embeds: [setupEmbed(0x57f287).setTitle("👋 Welcome!").setDescription(msg).setThumbnail(interaction.user.displayAvatarURL())] });
-      await interaction.reply({ content: "✅ Test welcome message sent!", ephemeral: true });
+      if (!ch || !ch.isTextBased()) return interaction.reply({ content: "❌ Welcome channel not found or deleted.", ephemeral: true });
+
+      const member = interaction.member as GuildMember;
+      const embed = buildWelcomeEmbed(settings, member, interaction.guild!);
+      await (ch as any).send({ embeds: [embed] });
+
+      if (settings.welcomeDmMessage) {
+        const dmMsg = replacePlaceholders(settings.welcomeDmMessage, member, interaction.guild!);
+        await interaction.user.send({ embeds: [setupEmbed(parseInt(settings.welcomeColor ?? "5865f2", 16)).setTitle(`👋 Welcome to ${interaction.guild!.name}!`).setDescription(dmMsg)] }).catch(() => {});
+      }
+      await interaction.reply({ content: "✅ Test welcome sent to the channel!" + (settings.welcomeDmMessage ? " DM also sent." : ""), ephemeral: true });
     },
   },
   {
     data: new SlashCommandBuilder()
       .setName("welcomecheck")
-      .setDescription("Check current welcome settings")
+      .setDescription("View current welcome system settings")
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
     async execute(interaction: ChatInputCommandInteraction) {
       if (!ownerOnly(interaction)) return;
-      const [settings] = await db.select().from(guildSettings).where(eq(guildSettings.guildId, interaction.guildId!));
-      await interaction.reply({ embeds: [setupEmbed(0x5865f2).setTitle("⚙️ Welcome Settings").addFields({ name: "Channel", value: settings?.welcomeChannel ? `<#${settings.welcomeChannel}>` : "Not set", inline: true }, { name: "Message", value: settings?.welcomeMessage ?? "Not set" })] });
+      const [s] = await db.select().from(guildSettings).where(eq(guildSettings.guildId, interaction.guildId!));
+      const color = parseInt(s?.welcomeColor ?? "5865f2", 16);
+      const embed = setupEmbed(color)
+        .setTitle("⚙️ Welcome Settings")
+        .addFields(
+          { name: "Channel", value: s?.welcomeChannel ? `<#${s.welcomeChannel}>` : "❌ Not set", inline: true },
+          { name: "Auto-Role", value: s?.welcomeAutoRoleId ? `<@&${s.welcomeAutoRoleId}>` : "None", inline: true },
+          { name: "DM on Join", value: s?.welcomeDmMessage ? "✅ On" : "❌ Off", inline: true },
+          { name: "Message", value: s?.welcomeMessage ? `\`\`\`${s.welcomeMessage}\`\`\`` : "❌ Not set", inline: false },
+          { name: "Image URL", value: s?.welcomeImageUrl ?? "None", inline: false },
+        );
+      if (s?.welcomeImageUrl) embed.setImage(s.welcomeImageUrl);
+      await interaction.reply({ embeds: [embed], ephemeral: true });
     },
   },
   {
