@@ -83,6 +83,35 @@ export const reports = pgTable("reports", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const ticketSettings = pgTable("ticket_settings", {
+  id: serial("id").primaryKey(),
+  guildId: text("guild_id").notNull().unique(),
+  categoryId: text("category_id"),
+  title: text("title").notNull().default("TICKETS"),
+  description: text("description").notNull().default("Open a ticket by clicking one of the buttons below."),
+  buy1Label: text("buy1_label").notNull().default("💰 BUY SCRIPT 1"),
+  buy1RoleId: text("buy1_role_id"),
+  buy2Label: text("buy2_label").notNull().default("🧠 BUY SCRIPT 2"),
+  buy2RoleId: text("buy2_role_id"),
+  supportLabel: text("support_label").notNull().default("🎧 SUPPORT/SUGGESTIONS"),
+  supportRoleId: text("support_role_id"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const tickets = pgTable("tickets", {
+  id: serial("id").primaryKey(),
+  guildId: text("guild_id").notNull(),
+  channelId: text("channel_id").notNull().unique(),
+  userId: text("user_id").notNull(),
+  ticketType: text("ticket_type").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  closedAt: timestamp("closed_at"),
+  closedBy: text("closed_by"),
+}, (t) => [index("tickets_channel_idx").on(t.channelId)]);
+
+export type TicketSettings = typeof ticketSettings.$inferSelect;
+export type Ticket = typeof tickets.$inferSelect;
+
 export const panels = pgTable("panels", {
   id: serial("id").primaryKey(),
   guildId: text("guild_id").notNull(),

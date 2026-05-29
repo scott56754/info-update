@@ -16,7 +16,8 @@ import { utilityCommands } from "./commands/utility.js";
 import { musicCommands } from "./commands/music.js";
 import { setupCommands } from "./commands/setup.js";
 import { panelCommands } from "./commands/panel.js";
-import { generateKey, obfuscateLua, buildLoader } from "./utils/obfuscate.js";
+import { ticketCommands, handleTicketButton, handleCloseTicket } from "./commands/ticket.js";
+import { generateKey, obfuscateLua } from "./utils/obfuscate.js";
 
 const OWNERS = ["1417552037717086355", "1501051958629503097"];
 
@@ -29,6 +30,7 @@ const allCommands = [
   ...musicCommands,
   ...setupCommands,
   ...panelCommands,
+  ...ticketCommands,
 ];
 
 export async function startBot() {
@@ -99,6 +101,19 @@ export async function startBot() {
 
     // Button handler
     if (interaction.isButton()) {
+      // Ticket close button
+      if (interaction.customId === "ticket-close") {
+        await handleCloseTicket(interaction as any);
+        return;
+      }
+
+      // Ticket open buttons (buy1, buy2, support)
+      if (interaction.customId.startsWith("ticket:")) {
+        const type = interaction.customId.split(":")[1];
+        await handleTicketButton(interaction, client, type);
+        return;
+      }
+
       const [ns, action, panelName] = interaction.customId.split(":");
       if (ns !== "panel") return;
 
