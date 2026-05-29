@@ -1,139 +1,165 @@
 import { useState } from "react";
 
-type Field = { key: string; value: string };
+const DEFAULT_FIELDS = [
+  { key: "DISCORD_CLIENT_ID", value: "" },
+  { key: "DISCORD_GUILD_ID", value: "" },
+  { key: "DISCORD_TOKEN", value: "" },
+];
 
-function App() {
-  const [fields, setFields] = useState<Field[]>([
-    { key: "", value: "" },
-  ]);
-  const [submitted, setSubmitted] = useState(false);
+function LockIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+    </svg>
+  );
+}
 
-  const updateField = (index: number, part: "key" | "value", val: string) => {
+function EyeIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function UserLockIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M16 11c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3z"/>
+      <path d="M8 11c1.66 0 3-1.34 3-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3z"/>
+      <path d="M8 14c-4 0-6 2-6 3v1h9"/>
+      <rect x="14" y="14" width="8" height="6" rx="1"/>
+      <path d="M16 14v-2a2 2 0 0 1 4 0v2"/>
+    </svg>
+  );
+}
+
+function KeyIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" />
+    </svg>
+  );
+}
+
+export default function App() {
+  const [fields, setFields] = useState(DEFAULT_FIELDS);
+  const [showValues, setShowValues] = useState(false);
+
+  const updateValue = (index: number, val: string) => {
     setFields((prev) => {
       const next = [...prev];
-      next[index] = { ...next[index], [part]: val };
+      next[index] = { ...next[index], value: val };
       return next;
     });
   };
 
-  const addField = () => {
-    setFields((prev) => [...prev, { key: "", value: "" }]);
-  };
-
-  const removeField = (index: number) => {
-    setFields((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setSubmitted(true);
-    setTimeout(() => setSubmitted(false), 2500);
-  };
-
   return (
-    <div className="min-h-screen bg-[#1a1a2e] flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
-        <div className="bg-[#16213e] border border-[#0f3460] rounded-xl shadow-2xl overflow-hidden">
+    <div style={{ minHeight: "100vh", background: "#1e1e2e", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px", fontFamily: "system-ui, -apple-system, sans-serif" }}>
+      <div style={{ width: "100%", maxWidth: "420px" }}>
+        <div style={{ background: "#2a2a3e", border: "1px solid #3a3a55", borderRadius: "10px", overflow: "hidden" }}>
           {/* Header */}
-          <div className="flex items-center gap-2 px-5 py-4 border-b border-[#0f3460]">
-            <svg
-              className="w-4 h-4 text-[#a78bfa]"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
-              />
-            </svg>
-            <span className="text-white font-semibold text-sm tracking-wide">
-              Info
-            </span>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "14px 16px", borderBottom: "1px solid #3a3a55" }}>
+            <span style={{ color: "#9a9ab0" }}><LockIcon /></span>
+            <span style={{ color: "#d4d4e8", fontWeight: 600, fontSize: "14px" }}>Secrets</span>
           </div>
 
-          {/* Form */}
-          <form onSubmit={handleSubmit} className="p-5 space-y-3">
-            {/* Column headers */}
-            <div className="flex gap-2 px-1">
-              <span className="flex-1 text-xs text-[#8892a4] font-medium uppercase tracking-wider">
-                Key
-              </span>
-              <span className="flex-1 text-xs text-[#8892a4] font-medium uppercase tracking-wider">
-                Value
-              </span>
-              <span className="w-7" />
-            </div>
-
-            {/* Fields */}
-            <div className="space-y-2">
-              {fields.map((field, i) => (
-                <div key={i} className="flex gap-2 items-center">
-                  <input
-                    type="text"
-                    placeholder="Key"
-                    value={field.key}
-                    onChange={(e) => updateField(i, "key", e.target.value)}
-                    className="flex-1 bg-[#0d1b2a] border border-[#0f3460] rounded-lg px-3 py-2 text-sm text-white placeholder-[#4a5568] focus:outline-none focus:border-[#a78bfa] transition-colors"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Value"
-                    value={field.value}
-                    onChange={(e) => updateField(i, "value", e.target.value)}
-                    className="flex-1 bg-[#0d1b2a] border border-[#0f3460] rounded-lg px-3 py-2 text-sm text-white placeholder-[#4a5568] focus:outline-none focus:border-[#a78bfa] transition-colors"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => removeField(i)}
-                    disabled={fields.length === 1}
-                    className="w-7 h-7 flex items-center justify-center text-[#4a5568] hover:text-[#ef4444] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-              ))}
-            </div>
-
-            {/* Add field */}
-            <button
-              type="button"
-              onClick={addField}
-              className="flex items-center gap-1.5 text-xs text-[#a78bfa] hover:text-[#c4b5fd] transition-colors mt-1"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              Add field
-            </button>
-
-            {/* Submit */}
-            <div className="pt-2">
+          {/* Column headers */}
+          <div style={{ display: "flex", gap: "8px", padding: "10px 16px 6px 16px" }}>
+            <div style={{ flex: "0 0 160px", color: "#7a7a95", fontSize: "12px", fontWeight: 500 }}>Key</div>
+            <div style={{ flex: 1, color: "#7a7a95", fontSize: "12px", fontWeight: 500, display: "flex", alignItems: "center", gap: "6px" }}>
+              Value
               <button
-                type="submit"
-                className="w-full bg-[#a78bfa] hover:bg-[#9061f9] text-white font-semibold text-sm py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2"
+                onClick={() => setShowValues((v) => !v)}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "#7a7a95", padding: 0, display: "flex", alignItems: "center" }}
               >
-                {submitted ? (
-                  <>
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                    Submitted!
-                  </>
-                ) : (
-                  "Continue"
-                )}
+                <EyeIcon />
               </button>
             </div>
-          </form>
+          </div>
+
+          {/* Rows */}
+          <div style={{ padding: "0 16px", display: "flex", flexDirection: "column", gap: "6px" }}>
+            {fields.map((field, i) => (
+              <div key={i} style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                {/* Key input */}
+                <input
+                  type="text"
+                  value={field.key}
+                  onChange={(e) => setFields((prev) => {
+                    const next = [...prev];
+                    next[i] = { ...next[i], key: e.target.value };
+                    return next;
+                  })}
+                  style={{
+                    flex: "0 0 160px",
+                    background: "#1e1e2e",
+                    border: "1px solid #3a3a55",
+                    borderRadius: "6px",
+                    padding: "8px 10px",
+                    color: "#9a9ab0",
+                    fontSize: "12px",
+                    outline: "none",
+                    fontFamily: "monospace",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                />
+                {/* Value input + icon */}
+                <div style={{ flex: 1, display: "flex", alignItems: "center", background: "#1e1e2e", border: "1px solid #3a3a55", borderRadius: "6px", overflow: "hidden" }}>
+                  <input
+                    type={showValues ? "text" : "password"}
+                    value={field.value}
+                    onChange={(e) => updateValue(i, e.target.value)}
+                    placeholder=""
+                    style={{
+                      flex: 1,
+                      background: "transparent",
+                      border: "none",
+                      padding: "8px 10px",
+                      color: "#d4d4e8",
+                      fontSize: "12px",
+                      outline: "none",
+                      fontFamily: "monospace",
+                      minWidth: 0,
+                    }}
+                  />
+                  <span style={{ padding: "0 10px", color: "#7a7a95", display: "flex", alignItems: "center" }}>
+                    <UserLockIcon />
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Footer */}
+          <div style={{ display: "flex", justifyContent: "flex-end", padding: "14px 16px" }}>
+            <button
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                background: "#4a4a8a",
+                border: "none",
+                borderRadius: "6px",
+                padding: "8px 18px",
+                color: "#a0a0d0",
+                fontSize: "13px",
+                fontWeight: 500,
+                cursor: "pointer",
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "#5a5a9a")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "#4a4a8a")}
+            >
+              <KeyIcon />
+              Continue
+            </button>
+          </div>
         </div>
       </div>
     </div>
   );
 }
-
-export default App;
