@@ -23,6 +23,17 @@ app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
+
+  // Keep-alive: ping own health endpoint every 4 minutes so Replit doesn't spin down the process
+  const keepAliveUrl = `http://localhost:${port}/api/healthz`;
+  setInterval(async () => {
+    try {
+      const res = await fetch(keepAliveUrl);
+      if (!res.ok) logger.warn({ status: res.status }, "Keep-alive ping returned non-OK");
+    } catch {
+      // Silently ignore — transient failures are expected during restarts
+    }
+  }, 4 * 60 * 1000);
 });
 
 startBot().catch((err) => logger.error({ err }, "Bot failed to start"));
