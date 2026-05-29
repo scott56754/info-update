@@ -6,6 +6,15 @@ import { db } from "@workspace/db";
 import { warnings, mutes, guildSettings } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 
+const OWNERS = ["1417552037717086355", "1501051958629503097"];
+function ownerOnly(i: ChatInputCommandInteraction) {
+  if (!OWNERS.includes(i.user.id)) {
+    i.reply({ content: "❌ You are not authorized to use this command.", ephemeral: true });
+    return false;
+  }
+  return true;
+}
+
 function modEmbed(color: number, title: string) {
   return new EmbedBuilder().setColor(color).setTitle(title).setTimestamp();
 }
@@ -30,6 +39,7 @@ export const moderationCommands = [
       .addStringOption((o) => o.setName("reason").setDescription("Reason").setRequired(false))
       .addIntegerOption((o) => o.setName("days").setDescription("Days of messages to delete (0-7)").setMinValue(0).setMaxValue(7)),
     async execute(interaction: ChatInputCommandInteraction) {
+      if (!ownerOnly(interaction)) return;
       const target = interaction.options.getMember("user") as GuildMember;
       const reason = interaction.options.getString("reason") ?? "No reason provided";
       const days = interaction.options.getInteger("days") ?? 0;
@@ -54,6 +64,7 @@ export const moderationCommands = [
       .addUserOption((o) => o.setName("user").setDescription("User to kick").setRequired(true))
       .addStringOption((o) => o.setName("reason").setDescription("Reason")),
     async execute(interaction: ChatInputCommandInteraction) {
+      if (!ownerOnly(interaction)) return;
       const target = interaction.options.getMember("user") as GuildMember;
       const reason = interaction.options.getString("reason") ?? "No reason provided";
       if (!target) return interaction.reply({ content: "User not found.", ephemeral: true });
@@ -78,6 +89,7 @@ export const moderationCommands = [
       .addIntegerOption((o) => o.setName("duration").setDescription("Duration in minutes").setRequired(true).setMinValue(1).setMaxValue(10080))
       .addStringOption((o) => o.setName("reason").setDescription("Reason")),
     async execute(interaction: ChatInputCommandInteraction) {
+      if (!ownerOnly(interaction)) return;
       const target = interaction.options.getMember("user") as GuildMember;
       const duration = interaction.options.getInteger("duration", true);
       const reason = interaction.options.getString("reason") ?? "No reason provided";
@@ -101,6 +113,7 @@ export const moderationCommands = [
       .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
       .addUserOption((o) => o.setName("user").setDescription("User to unmute").setRequired(true)),
     async execute(interaction: ChatInputCommandInteraction) {
+      if (!ownerOnly(interaction)) return;
       const target = interaction.options.getMember("user") as GuildMember;
       if (!target) return interaction.reply({ content: "User not found.", ephemeral: true });
       await target.timeout(null);
@@ -118,6 +131,7 @@ export const moderationCommands = [
       .addUserOption((o) => o.setName("user").setDescription("User to warn").setRequired(true))
       .addStringOption((o) => o.setName("reason").setDescription("Reason").setRequired(true)),
     async execute(interaction: ChatInputCommandInteraction) {
+      if (!ownerOnly(interaction)) return;
       const target = interaction.options.getUser("user", true);
       const reason = interaction.options.getString("reason", true);
       await db.insert(warnings).values({ userId: target.id, guildId: interaction.guildId!, moderatorId: interaction.user.id, reason });
@@ -138,6 +152,7 @@ export const moderationCommands = [
       .setDescription("View warnings for a user")
       .addUserOption((o) => o.setName("user").setDescription("User to check").setRequired(true)),
     async execute(interaction: ChatInputCommandInteraction) {
+      if (!ownerOnly(interaction)) return;
       const target = interaction.options.getUser("user", true);
       const userWarns = await db.select().from(warnings).where(and(eq(warnings.userId, target.id), eq(warnings.guildId, interaction.guildId!)));
       const embed = modEmbed(0xfee75c, `⚠️ Warnings for ${target.tag}`)
@@ -155,6 +170,7 @@ export const moderationCommands = [
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
       .addIntegerOption((o) => o.setName("amount").setDescription("Number of messages to delete (1-100)").setRequired(true).setMinValue(1).setMaxValue(100)),
     async execute(interaction: ChatInputCommandInteraction) {
+      if (!ownerOnly(interaction)) return;
       const amount = interaction.options.getInteger("amount", true);
       const channel = interaction.channel as any;
       await interaction.deferReply({ ephemeral: true });
@@ -169,6 +185,7 @@ export const moderationCommands = [
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
       .addIntegerOption((o) => o.setName("amount").setDescription("Messages to scan (1-100)").setRequired(true).setMinValue(1).setMaxValue(100)),
     async execute(interaction: ChatInputCommandInteraction) {
+      if (!ownerOnly(interaction)) return;
       const amount = interaction.options.getInteger("amount", true);
       await interaction.deferReply({ ephemeral: true });
       const messages = await (interaction.channel as any).messages.fetch({ limit: amount });
@@ -185,6 +202,7 @@ export const moderationCommands = [
       .addUserOption((o) => o.setName("user").setDescription("User").setRequired(true))
       .addIntegerOption((o) => o.setName("amount").setDescription("Messages to scan (1-100)").setRequired(true).setMinValue(1).setMaxValue(100)),
     async execute(interaction: ChatInputCommandInteraction) {
+      if (!ownerOnly(interaction)) return;
       const target = interaction.options.getUser("user", true);
       const amount = interaction.options.getInteger("amount", true);
       await interaction.deferReply({ ephemeral: true });
@@ -201,6 +219,7 @@ export const moderationCommands = [
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
       .addIntegerOption((o) => o.setName("amount").setDescription("Amount to clear (1-100)").setMinValue(1).setMaxValue(100)),
     async execute(interaction: ChatInputCommandInteraction) {
+      if (!ownerOnly(interaction)) return;
       const amount = interaction.options.getInteger("amount") ?? 100;
       await interaction.deferReply({ ephemeral: true });
       const deleted = await (interaction.channel as any).bulkDelete(amount, true);
@@ -214,6 +233,7 @@ export const moderationCommands = [
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
       .addStringOption((o) => o.setName("reason").setDescription("Reason")),
     async execute(interaction: ChatInputCommandInteraction) {
+      if (!ownerOnly(interaction)) return;
       const reason = interaction.options.getString("reason") ?? "Channel locked by moderator";
       await (interaction.channel as any).permissionOverwrites.edit(interaction.guild!.roles.everyone, { SendMessages: false });
       const embed = modEmbed(0xed4245, "🔒 Channel Locked")
@@ -227,6 +247,7 @@ export const moderationCommands = [
       .setDescription("Unlock the current channel")
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
     async execute(interaction: ChatInputCommandInteraction) {
+      if (!ownerOnly(interaction)) return;
       await (interaction.channel as any).permissionOverwrites.edit(interaction.guild!.roles.everyone, { SendMessages: null });
       const embed = modEmbed(0x57f287, "🔓 Channel Unlocked")
         .setDescription(`${interaction.channel} has been unlocked.`);
@@ -239,6 +260,7 @@ export const moderationCommands = [
       .setDescription("Lock all channels in the server")
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
     async execute(interaction: ChatInputCommandInteraction) {
+      if (!ownerOnly(interaction)) return;
       await interaction.deferReply();
       const channels = interaction.guild!.channels.cache.filter((c) => c.isTextBased());
       let count = 0;
@@ -259,6 +281,7 @@ export const moderationCommands = [
       .setDescription("Unlock all channels in the server")
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
     async execute(interaction: ChatInputCommandInteraction) {
+      if (!ownerOnly(interaction)) return;
       await interaction.deferReply();
       const channels = interaction.guild!.channels.cache.filter((c) => c.isTextBased());
       let count = 0;
