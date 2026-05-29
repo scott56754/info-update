@@ -1,7 +1,7 @@
 import {
   Client, GatewayIntentBits, Events, REST, Routes,
   ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder,
-  EmbedBuilder, AttachmentBuilder,
+  EmbedBuilder, type Logger,
 } from "discord.js";
 import { logger } from "../lib/logger.js";
 import { db } from "@workspace/db";
@@ -18,6 +18,7 @@ import { setupCommands } from "./commands/setup.js";
 import { panelCommands } from "./commands/panel.js";
 import { ticketCommands, handleTicketButton, handleCloseTicket } from "./commands/ticket.js";
 import { generateKey, obfuscateLua } from "./utils/obfuscate.js";
+import { handlePrefixMessage } from "./prefix.js";
 
 const OWNERS = ["1417552037717086355", "1501051958629503097"];
 
@@ -33,6 +34,14 @@ const allCommands = [
   ...ticketCommands,
 ];
 
+const BASE_INTENTS = [
+  GatewayIntentBits.Guilds,
+  GatewayIntentBits.GuildMessages,
+  GatewayIntentBits.GuildVoiceStates,
+  GatewayIntentBits.GuildInvites,
+  GatewayIntentBits.DirectMessages,
+];
+
 export async function startBot() {
   const token = process.env.DISCORD_TOKEN;
   const clientId = process.env.DISCORD_CLIENT_ID;
@@ -43,34 +52,44 @@ export async function startBot() {
     return;
   }
 
-  const client = new Client({
-    intents: [
-      GatewayIntentBits.Guilds,
-      GatewayIntentBits.GuildMessages,
-      GatewayIntentBits.GuildVoiceStates,
-      GatewayIntentBits.GuildInvites,
-      GatewayIntentBits.DirectMessages,
-    ],
-  });
+  // Try with MessageContent (prefix commands). If Discord rejects it, fall back without so bot stays online.
+  try {
+    const client = new Client({ intents: [...BASE_INTENTS, GatewayIntentBits.MessageContent] });
+    await setupAndLogin(client, token, clientId, guildId, true);
+  } catch (err: any) {
+    if (err?.message === "Used disallowed intents") {
+      logger.warn(
+        "MessageContent intent not enabled — prefix commands (.!?) disabled. " +
+        "To enable: discord.com/developers/applications → Bot → Privileged Gateway Intents → Message Content Intent → Save → restart bot."
+      );
+      const client = new Client({ intents: BASE_INTENTS });
+      await setupAndLogin(client, token, clientId, guildId, false);
+    } else {
+      throw err;
+    }
+  }
+}
 
-  // Register slash commands — guild-only if possible, global as fallback.
-  // Always clear the OTHER set to prevent duplicate commands showing up.
+async function setupAndLogin(
+  client: Client,
+  token: string,
+  clientId: string,
+  guildId: string | undefined,
+  prefixEnabled: boolean,
+) {
+  // Register slash commands — guild first, global as fallback, always clear the other to avoid duplicates
   try {
     const rest = new REST().setToken(token);
     const commandData = allCommands.map((c) => c.data.toJSON());
     if (guildId) {
       try {
-        // Register to guild
         await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: commandData });
         logger.info({ count: commandData.length }, "Registered guild slash commands");
-        // Clear global commands so there are no duplicates
         await rest.put(Routes.applicationCommands(clientId), { body: [] }).catch(() => {});
       } catch (guildErr: any) {
-        logger.warn({ code: guildErr?.code }, "Guild command registration failed — falling back to global commands");
-        // Register globally
+        logger.warn({ code: guildErr?.code }, "Guild command registration failed — falling back to global");
         await rest.put(Routes.applicationCommands(clientId), { body: commandData });
         logger.info({ count: commandData.length }, "Registered global slash commands (fallback)");
-        // Try to clear guild commands to avoid duplicates (may fail if no scope — that's ok)
         await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: [] }).catch(() => {});
       }
     } else {
@@ -81,14 +100,23 @@ export async function startBot() {
     logger.error({ err }, "Failed to register slash commands");
   }
 
+  // Ready
   client.once(Events.ClientReady, (c) => {
-    logger.info({ tag: c.user.tag }, "Discord bot ready");
+    logger.info({ tag: c.user.tag, prefixEnabled }, "Discord bot ready");
     c.user.setActivity("Serving the server", { type: 3 });
     startReminderLoop(client);
   });
 
-  // Slash command handler
+  // Prefix commands (.!?)
+  if (prefixEnabled) {
+    client.on(Events.MessageCreate, async (message) => {
+      await handlePrefixMessage(message, client).catch(() => {});
+    });
+  }
+
+  // Slash commands + button/modal interactions
   client.on(Events.InteractionCreate, async (interaction) => {
+    // ── Slash commands ──────────────────────────────────────────────────
     if (interaction.isChatInputCommand()) {
       const command = allCommands.find((c) => c.data.name === interaction.commandName);
       if (!command) return;
@@ -97,225 +125,178 @@ export async function startBot() {
       } catch (err) {
         logger.error({ err, command: interaction.commandName }, "Command error");
         const msg = { content: "An error occurred while running this command.", ephemeral: true };
-        if (interaction.replied || interaction.deferred) {
-          await interaction.followUp(msg).catch(() => {});
-        } else {
-          await interaction.reply(msg).catch(() => {});
-        }
+        if (interaction.replied || interaction.deferred) await interaction.followUp(msg).catch(() => {});
+        else await interaction.reply(msg).catch(() => {});
       }
       return;
     }
 
-    // Button handler
+    // ── Buttons ─────────────────────────────────────────────────────────
     if (interaction.isButton()) {
-      // Ticket close button
+      // Ticket close
       if (interaction.customId === "ticket-close") {
         await handleCloseTicket(interaction as any);
         return;
       }
-
-      // Ticket open buttons (buy1, buy2, support)
+      // Ticket open
       if (interaction.customId.startsWith("ticket:")) {
-        const type = interaction.customId.split(":")[1];
-        await handleTicketButton(interaction, client, type);
+        await handleTicketButton(interaction, client, interaction.customId.split(":")[1]);
         return;
       }
-
+      // Panel buttons
       const [ns, action, panelName] = interaction.customId.split(":");
       if (ns !== "panel") return;
-
-      const [panel] = await db.select().from(panels)
-        .where(and(eq(panels.guildId, interaction.guildId!), eq(panels.name, panelName)));
-      if (!panel) return interaction.reply({ content: "❌ Panel not found.", ephemeral: true });
-
-      const userId = interaction.user.id;
-
-      // Check blacklist
-      const [bl] = await db.select().from(panelBlacklist)
-        .where(and(eq(panelBlacklist.panelId, panel.id), eq(panelBlacklist.userId, userId), eq(panelBlacklist.active, true)));
-      if (bl) {
-        return interaction.reply({
-          content: `🔨 You are blacklisted from **${panelName}**.\n**Reason:** ${bl.reason}`,
-          ephemeral: true,
-        });
-      }
-
-      const [wl] = await db.select().from(panelWhitelist)
-        .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, userId)));
-
-      if (action === "redeem") {
-        // Show modal to enter key
-        const modal = new ModalBuilder()
-          .setCustomId(`panel-redeem:${panelName}`)
-          .setTitle(`Redeem Key — ${panelName}`);
-        const keyInput = new TextInputBuilder()
-          .setCustomId("key")
-          .setLabel("Enter your key")
-          .setStyle(TextInputStyle.Short)
-          .setPlaceholder("XXXXXX-XXXXXX-XXXXXX-XXXXXX")
-          .setRequired(true);
-        modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(keyInput));
-        await interaction.showModal(modal);
-        return;
-      }
-
-      if (action === "script") {
-        if (!wl) {
-          return interaction.reply({
-            content: "❌ You are not whitelisted — redeem a key first by clicking **Redeem Key**.",
-            ephemeral: true,
-          });
-        }
-        if (!panel.scriptContent) {
-          return interaction.reply({ content: "⚠️ No script has been set for this panel yet.", ephemeral: true });
-        }
-
-        // Generate or retrieve user key
-        let userKey = wl.keyCode;
-        if (!userKey) {
-          userKey = generateKey();
-          await db.update(panelWhitelist).set({ keyCode: userKey })
-            .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, userId)));
-        }
-
-        // Build the loader URL using the Replit dev domain
-        const domain = process.env.REPLIT_DEV_DOMAIN
-          ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-          : `http://localhost:${process.env.PORT ?? 8080}`;
-        const loaderUrl = `${domain}/api/loader/${encodeURIComponent(panelName)}/${encodeURIComponent(userKey)}`;
-
-        // Send script as code block in channel (ephemeral), NOT as file or DM
-        const scriptBlock = `script_key="${userKey}";\nloadstring(game:HttpGet("${loaderUrl}"))()`;
-
-        await interaction.reply({
-          content: `Here is your script:\n\`\`\`lua\n${scriptBlock}\n\`\`\``,
-          ephemeral: true,
-        });
-
-        // Send ONLY the key to DMs (not the script source)
-        try {
-          const dmEmbed = new EmbedBuilder().setColor(0x5865f2)
-            .setTitle(`🔑 Your Script Key — ${panelName}`)
-            .setDescription(`\`\`\`\n${userKey}\n\`\`\``)
-            .addFields({ name: "Panel", value: panelName, inline: true })
-            .setFooter({ text: "Do not share this key. Use it in the loader script." })
-            .setTimestamp();
-          await interaction.user.send({ embeds: [dmEmbed] });
-        } catch {}
-        return;
-      }
-
-      if (action === "role") {
-        if (!wl) {
-          return interaction.reply({
-            content: "❌ You are not whitelisted — redeem a key first by clicking **Redeem Key**.",
-            ephemeral: true,
-          });
-        }
-        if (!panel.roleId) {
-          return interaction.reply({ content: "⚠️ No role has been configured for this panel. Contact an admin.", ephemeral: true });
-        }
-        try {
-          const member = await interaction.guild!.members.fetch(userId);
-          await member.roles.add(panel.roleId);
-          await interaction.reply({ content: `✅ You have been given the <@&${panel.roleId}> role!`, ephemeral: true });
-        } catch {
-          await interaction.reply({ content: "⚠️ Role assignment is managed by admins. Contact support if you are missing your role.", ephemeral: true });
-        }
-        return;
-      }
-
-      if (action === "hwid") {
-        if (!wl) {
-          return interaction.reply({
-            content: "❌ You are not whitelisted. Redeem a key first.",
-            ephemeral: true,
-          });
-        }
-        await db.update(panelWhitelist).set({ hwid: null })
-          .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, userId)));
-        await interaction.reply({ content: "✅ Your HWID has been reset. You can use the script on a new device.", ephemeral: true });
-        return;
-      }
-
-      if (action === "stats") {
-        const embed = new EmbedBuilder().setColor(0x2b2d31)
-          .setTitle("Your License Stats")
-          .addFields(
-            { name: "Status", value: wl ? "✅ Whitelisted" : "No key", inline: false },
-            { name: "HWID Locked", value: wl?.hwid ? "Yes" : "No", inline: false },
-            { name: "Expires", value: "Never (permanent)", inline: false }
-          );
-        await interaction.reply({ embeds: [embed], ephemeral: true });
-        return;
-      }
+      await handlePanelButton(interaction, client, action, panelName);
+      return;
     }
 
-    // Modal submit handler
+    // ── Modals ──────────────────────────────────────────────────────────
     if (interaction.isModalSubmit()) {
       const [ns, panelName] = interaction.customId.split(":");
       if (ns !== "panel-redeem") return;
-
-      const keyInput = interaction.fields.getTextInputValue("key").trim().toUpperCase();
-
-      const [panel] = await db.select().from(panels)
-        .where(and(eq(panels.guildId, interaction.guildId!), eq(panels.name, panelName)));
-      if (!panel) return interaction.reply({ content: "❌ Panel not found.", ephemeral: true });
-
-      // Check if already whitelisted
-      const [existingWl] = await db.select().from(panelWhitelist)
-        .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, interaction.user.id)));
-      if (existingWl) {
-        return interaction.reply({ content: "✅ You are already whitelisted! Click **Get Script** to get your script.", ephemeral: true });
-      }
-
-      // Validate key
-      const [key] = await db.select().from(panelKeys)
-        .where(and(eq(panelKeys.panelId, panel.id), eq(panelKeys.keyCode, keyInput), eq(panelKeys.active, true)));
-
-      if (!key) {
-        return interaction.reply({ content: "❌ Invalid or already used key. Please check and try again.", ephemeral: true });
-      }
-
-      if (key.usedBy && key.usedBy !== interaction.user.id) {
-        return interaction.reply({ content: "❌ This key has already been redeemed by someone else.", ephemeral: true });
-      }
-
-      // Redeem
-      await db.update(panelKeys).set({ usedBy: interaction.user.id, usedAt: new Date() })
-        .where(eq(panelKeys.id, key.id));
-      await db.insert(panelWhitelist).values({
-        panelId: panel.id,
-        userId: interaction.user.id,
-        keyCode: keyInput,
-        whitelistedBy: "key-redemption",
-      });
-
-      const embed = new EmbedBuilder().setColor(0x57f287)
-        .setTitle("✅ Key Redeemed!")
-        .setDescription(`You are now whitelisted for **${panelName}**!\nClick **Get Script** to access your script.`)
-        .setTimestamp();
-      await interaction.reply({ embeds: [embed], ephemeral: true });
-
-      // Notify owners
-      for (const ownerId of OWNERS) {
-        try {
-          const owner = await client.users.fetch(ownerId);
-          const notif = new EmbedBuilder().setColor(0x5865f2)
-            .setTitle("🔑 Key Redeemed")
-            .addFields(
-              { name: "User", value: `${interaction.user.tag} (${interaction.user.id})`, inline: true },
-              { name: "Panel", value: panelName, inline: true },
-              { name: "Key", value: keyInput, inline: true }
-            ).setTimestamp();
-          await owner.send({ embeds: [notif] });
-        } catch {}
-      }
+      await handlePanelRedeem(interaction, client, panelName);
     }
   });
 
   await client.login(token);
 }
+
+// ── Panel button handler ───────────────────────────────────────────────────
+
+async function handlePanelButton(interaction: any, client: Client, action: string, panelName: string) {
+  const [panel] = await db.select().from(panels)
+    .where(and(eq(panels.guildId, interaction.guildId), eq(panels.name, panelName)));
+  if (!panel) return interaction.reply({ content: "❌ Panel not found.", ephemeral: true });
+
+  const userId = interaction.user.id;
+
+  const [bl] = await db.select().from(panelBlacklist)
+    .where(and(eq(panelBlacklist.panelId, panel.id), eq(panelBlacklist.userId, userId), eq(panelBlacklist.active, true)));
+  if (bl) {
+    return interaction.reply({ content: `🔨 You are blacklisted from **${panelName}**.\n**Reason:** ${bl.reason}`, ephemeral: true });
+  }
+
+  const [wl] = await db.select().from(panelWhitelist)
+    .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, userId)));
+
+  if (action === "redeem") {
+    const modal = new ModalBuilder()
+      .setCustomId(`panel-redeem:${panelName}`)
+      .setTitle(`Redeem Key — ${panelName}`);
+    const keyInput = new TextInputBuilder()
+      .setCustomId("key").setLabel("Enter your key")
+      .setStyle(TextInputStyle.Short).setPlaceholder("XXXXXX-XXXXXX-XXXXXX-XXXXXX").setRequired(true);
+    modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(keyInput));
+    await interaction.showModal(modal);
+    return;
+  }
+
+  if (action === "script") {
+    if (!wl) return interaction.reply({ content: "❌ You are not whitelisted — redeem a key first by clicking **Redeem Key**.", ephemeral: true });
+    if (!panel.scriptContent) return interaction.reply({ content: "⚠️ No script has been set for this panel yet.", ephemeral: true });
+
+    let userKey = wl.keyCode;
+    if (!userKey) {
+      userKey = generateKey();
+      await db.update(panelWhitelist).set({ keyCode: userKey })
+        .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, userId)));
+    }
+
+    const domain = process.env.REPLIT_DEV_DOMAIN
+      ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+      : `http://localhost:${process.env.PORT ?? 8080}`;
+    const loaderUrl = `${domain}/api/loader/${encodeURIComponent(panelName)}/${encodeURIComponent(userKey)}`;
+    const scriptBlock = `script_key="${userKey}";\nloadstring(game:HttpGet("${loaderUrl}"))()`;
+
+    await interaction.reply({ content: `Here is your script:\n\`\`\`lua\n${scriptBlock}\n\`\`\``, ephemeral: true });
+
+    try {
+      await interaction.user.send({
+        embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle(`🔑 Your Script Key — ${panelName}`)
+          .setDescription(`\`\`\`\n${userKey}\n\`\`\``)
+          .addFields({ name: "Panel", value: panelName, inline: true })
+          .setFooter({ text: "Do not share this key." }).setTimestamp()],
+      });
+    } catch {}
+    return;
+  }
+
+  if (action === "role") {
+    if (!wl) return interaction.reply({ content: "❌ You are not whitelisted — redeem a key first.", ephemeral: true });
+    if (!panel.roleId) return interaction.reply({ content: "⚠️ No role configured for this panel. Contact an admin.", ephemeral: true });
+    try {
+      const member = await interaction.guild.members.fetch(userId);
+      await member.roles.add(panel.roleId);
+      await interaction.reply({ content: `✅ You have been given the <@&${panel.roleId}> role!`, ephemeral: true });
+    } catch {
+      await interaction.reply({ content: "⚠️ Role assignment is managed by admins. Contact support if you are missing your role.", ephemeral: true });
+    }
+    return;
+  }
+
+  if (action === "hwid") {
+    if (!wl) return interaction.reply({ content: "❌ You are not whitelisted. Redeem a key first.", ephemeral: true });
+    await db.update(panelWhitelist).set({ hwid: null })
+      .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, userId)));
+    await interaction.reply({ content: "✅ Your HWID has been reset. You can use the script on a new device.", ephemeral: true });
+    return;
+  }
+
+  if (action === "stats") {
+    const e = new EmbedBuilder().setColor(0x2b2d31).setTitle("Your License Stats")
+      .addFields(
+        { name: "Status", value: wl ? "✅ Whitelisted" : "No key", inline: false },
+        { name: "HWID Locked", value: wl?.hwid ? "Yes" : "No", inline: false },
+        { name: "Expires", value: "Never (permanent)", inline: false },
+      );
+    await interaction.reply({ embeds: [e], ephemeral: true });
+  }
+}
+
+// ── Panel redeem modal handler ─────────────────────────────────────────────
+
+async function handlePanelRedeem(interaction: any, client: Client, panelName: string) {
+  const keyInput = interaction.fields.getTextInputValue("key").trim().toUpperCase();
+
+  const [panel] = await db.select().from(panels)
+    .where(and(eq(panels.guildId, interaction.guildId), eq(panels.name, panelName)));
+  if (!panel) return interaction.reply({ content: "❌ Panel not found.", ephemeral: true });
+
+  const [existingWl] = await db.select().from(panelWhitelist)
+    .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, interaction.user.id)));
+  if (existingWl) return interaction.reply({ content: "✅ You are already whitelisted! Click **Get Script** to access your script.", ephemeral: true });
+
+  const [key] = await db.select().from(panelKeys)
+    .where(and(eq(panelKeys.panelId, panel.id), eq(panelKeys.keyCode, keyInput), eq(panelKeys.active, true)));
+  if (!key) return interaction.reply({ content: "❌ Invalid or already used key. Please check and try again.", ephemeral: true });
+  if (key.usedBy && key.usedBy !== interaction.user.id) return interaction.reply({ content: "❌ This key has already been redeemed by someone else.", ephemeral: true });
+
+  await db.update(panelKeys).set({ usedBy: interaction.user.id, usedAt: new Date() }).where(eq(panelKeys.id, key.id));
+  await db.insert(panelWhitelist).values({ panelId: panel.id, userId: interaction.user.id, keyCode: keyInput, whitelistedBy: "key-redemption" });
+
+  await interaction.reply({
+    embeds: [new EmbedBuilder().setColor(0x57f287).setTitle("✅ Key Redeemed!")
+      .setDescription(`You are now whitelisted for **${panelName}**!\nClick **Get Script** to access your script.`).setTimestamp()],
+    ephemeral: true,
+  });
+
+  // Notify owners
+  for (const ownerId of OWNERS) {
+    try {
+      const owner = await client.users.fetch(ownerId);
+      await owner.send({
+        embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle("🔑 Key Redeemed")
+          .addFields(
+            { name: "User", value: `${interaction.user.tag} (${interaction.user.id})`, inline: true },
+            { name: "Panel", value: panelName, inline: true },
+            { name: "Key", value: keyInput, inline: true },
+          ).setTimestamp()],
+      });
+    } catch {}
+  }
+}
+
+// ── Reminder loop ──────────────────────────────────────────────────────────
 
 async function startReminderLoop(client: Client) {
   setInterval(async () => {
@@ -324,9 +305,7 @@ async function startReminderLoop(client: Client) {
       for (const r of due) {
         try {
           const channel = await client.channels.fetch(r.channelId);
-          if (channel && channel.isTextBased()) {
-            await (channel as any).send(`<@${r.userId}> ⏰ Reminder: **${r.message}**`);
-          }
+          if (channel?.isTextBased()) await (channel as any).send(`<@${r.userId}> ⏰ Reminder: **${r.message}**`);
           await db.delete(reminders).where(eq(reminders.id, r.id));
         } catch {}
       }
