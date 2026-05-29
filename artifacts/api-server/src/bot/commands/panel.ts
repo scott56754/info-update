@@ -364,7 +364,7 @@ export const panelCommands = [
   {
     data: new SlashCommandBuilder()
       .setName("listkeys")
-      .setDescription("List all keys for a panel")
+      .setDescription("List active redeemed keys for a panel (with time left)")
       .addStringOption((o) => o.setName("panel").setDescription("Panel name").setRequired(true)),
     async execute(interaction: ChatInputCommandInteraction) {
       if (!ownerOnly(interaction)) return;
@@ -372,32 +372,78 @@ export const panelCommands = [
       const panel = await getPanel(interaction.guildId!, name);
       if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, ephemeral: true });
 
-      const keys = await db.select().from(panelKeys).where(eq(panelKeys.panelId, panel.id));
-      if (!keys.length) return interaction.reply({ content: `No keys found for **${name}**.`, ephemeral: true });
+      const allKeys = await db.select().from(panelKeys).where(eq(panelKeys.panelId, panel.id));
+      if (!allKeys.length) return interaction.reply({ content: `No keys found for **${name}**.`, ephemeral: true });
 
       const now = new Date();
-      const lines = keys.map((k) => {
-        const expired = k.expiresAt && k.expiresAt <= now;
-        const statusIcon = !k.active || expired ? "🔴" : "🟢";
-        const usedPart = k.usedBy ? `— used by <@${k.usedBy}>` : "— unused";
-        const timeLeft = k.expiresAt ? ` | ⏰ ${expired ? "Expired" : formatTimeLeft(k.expiresAt)}` : " | ⏰ Never";
-        return `${statusIcon} \`${k.keyCode}\` ${usedPart}${timeLeft}`;
+      // Only show keys that are: active (not revoked), redeemed (usedBy set), and not expired
+      const activeKeys = allKeys.filter((k) => k.active && k.usedBy && !(k.expiresAt && k.expiresAt <= now));
+
+      if (!activeKeys.length) {
+        return interaction.reply({ content: `No active redeemed keys for **${name}**.`, ephemeral: true });
+      }
+
+      const lines = activeKeys.map((k) => {
+        const timeLeft = k.expiresAt ? `⏰ ${formatTimeLeft(k.expiresAt)} left` : "⏰ Permanent";
+        return `🟢 \`${k.keyCode}\` — <@${k.usedBy}> | ${timeLeft}`;
       });
 
       const content = lines.join("\n");
       if (content.length > 1900) {
-        const fileContent = keys.map((k) => {
-          const expired = k.expiresAt && k.expiresAt <= now;
-          const status = !k.active || expired ? "EXPIRED/REVOKED" : "ACTIVE";
-          const expiry = k.expiresAt ? k.expiresAt.toISOString() : "never";
+        const fileContent = activeKeys.map((k) => {
+          const expiry = k.expiresAt ? k.expiresAt.toISOString() : "permanent";
           const timeLeft = k.expiresAt ? formatTimeLeft(k.expiresAt) : "permanent";
-          return `${status} | ${k.keyCode} | used_by: ${k.usedBy ?? "unused"} | expires: ${expiry} | time_left: ${timeLeft}`;
+          return `${k.keyCode} | user: ${k.usedBy} | expires: ${expiry} | time_left: ${timeLeft}`;
         }).join("\n");
         const buf = Buffer.from(fileContent, "utf8");
         const file = new AttachmentBuilder(buf, { name: `keys-${name}.txt` });
-        return interaction.reply({ content: `Found **${keys.length}** keys for **${name}**:`, files: [file], ephemeral: true });
+        return interaction.reply({ content: `**${activeKeys.length}** active keys for **${name}**:`, files: [file], ephemeral: true });
       }
-      await interaction.reply({ content: `**Keys for \`${name}\`:**\n${content}`, ephemeral: true });
+      await interaction.reply({ content: `**Active keys for \`${name}\` (${activeKeys.length}):**\n${content}`, ephemeral: true });
+    },
+  },
+  {
+    data: new SlashCommandBuilder()
+      .setName("setkeytime")
+      .setDescription("Update the expiry time on an existing key")
+      .addStringOption((o) => o.setName("key").setDescription("The key code to update").setRequired(true))
+      .addStringOption((o) => o.setName("duration").setDescription("New duration from now e.g. 7d, 30d, 24h, or 'permanent' to remove expiry").setRequired(true)),
+    async execute(interaction: ChatInputCommandInteraction) {
+      if (!ownerOnly(interaction)) return;
+      const keyCode = interaction.options.getString("key", true).toUpperCase();
+      const durationStr = interaction.options.getString("duration", true).toLowerCase().trim();
+
+      const [key] = await db.select().from(panelKeys).where(eq(panelKeys.keyCode, keyCode));
+      if (!key) return interaction.reply({ content: "❌ Key not found.", ephemeral: true });
+      if (!key.active) return interaction.reply({ content: "❌ That key has been revoked.", ephemeral: true });
+
+      let newExpiresAt: Date | null = null;
+      if (durationStr !== "permanent" && durationStr !== "never") {
+        const ms = parseDuration(durationStr);
+        if (!ms) return interaction.reply({ content: "❌ Invalid duration. Use e.g. `7d`, `30d`, `24h`, or `permanent`.", ephemeral: true });
+        newExpiresAt = new Date(Date.now() + ms);
+      }
+
+      await db.update(panelKeys).set({ expiresAt: newExpiresAt }).where(eq(panelKeys.keyCode, keyCode));
+
+      // Also sync expiry on whitelist entry if this key was redeemed
+      if (key.usedBy) {
+        const [panel] = await db.select().from(panelKeys).where(eq(panelKeys.keyCode, keyCode));
+        await db.update(panelWhitelist).set({ expiresAt: newExpiresAt })
+          .where(and(eq(panelWhitelist.panelId, key.panelId), eq(panelWhitelist.keyCode, keyCode)));
+      }
+
+      const expiryDisplay = newExpiresAt
+        ? `<t:${Math.floor(newExpiresAt.getTime() / 1000)}:F> (<t:${Math.floor(newExpiresAt.getTime() / 1000)}:R>)`
+        : "Permanent (never expires)";
+
+      const embed = new EmbedBuilder().setColor(0x57f287).setTitle("⏰ Key Expiry Updated")
+        .addFields(
+          { name: "Key", value: `\`${keyCode}\``, inline: true },
+          { name: "Redeemed By", value: key.usedBy ? `<@${key.usedBy}>` : "Unredeemed", inline: true },
+          { name: "New Expiry", value: expiryDisplay },
+        );
+      await interaction.reply({ embeds: [embed], ephemeral: true });
     },
   },
   {
