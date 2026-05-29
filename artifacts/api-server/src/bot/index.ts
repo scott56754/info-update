@@ -53,18 +53,25 @@ export async function startBot() {
     ],
   });
 
-  // Register slash commands — try guild first, fall back to global
+  // Register slash commands — guild-only if possible, global as fallback.
+  // Always clear the OTHER set to prevent duplicate commands showing up.
   try {
     const rest = new REST().setToken(token);
     const commandData = allCommands.map((c) => c.data.toJSON());
     if (guildId) {
       try {
+        // Register to guild
         await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: commandData });
         logger.info({ count: commandData.length }, "Registered guild slash commands");
+        // Clear global commands so there are no duplicates
+        await rest.put(Routes.applicationCommands(clientId), { body: [] }).catch(() => {});
       } catch (guildErr: any) {
         logger.warn({ code: guildErr?.code }, "Guild command registration failed — falling back to global commands");
+        // Register globally
         await rest.put(Routes.applicationCommands(clientId), { body: commandData });
         logger.info({ count: commandData.length }, "Registered global slash commands (fallback)");
+        // Try to clear guild commands to avoid duplicates (may fail if no scope — that's ok)
+        await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: [] }).catch(() => {});
       }
     } else {
       await rest.put(Routes.applicationCommands(clientId), { body: commandData });
