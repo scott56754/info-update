@@ -23,6 +23,13 @@ function ownerOnly(interaction: ChatInputCommandInteraction) {
   return true;
 }
 
+async function tryRemovePanelRole(guild: import("discord.js").Guild, userId: string, roleId: string) {
+  try {
+    const member = await guild.members.fetch(userId);
+    if (member.roles.cache.has(roleId)) await member.roles.remove(roleId, "panel access revoked");
+  } catch {}
+}
+
 async function getPanel(guildId: string, name: string) {
   const [panel] = await db.select().from(panels).where(
     and(eq(panels.guildId, guildId), eq(panels.name, name.toLowerCase()))
@@ -313,8 +320,13 @@ export const panelCommands = [
         const deleted = await db.delete(panelWhitelist)
           .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, target.id))).returning();
         if (!deleted.length) return interaction.reply({ content: `❌ ${target.tag} is not whitelisted for **${name}**.`, flags: MessageFlags.Ephemeral });
+        if (panel.roleId) await tryRemovePanelRole(interaction.guild!, target.id, panel.roleId);
         await interaction.reply({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle("🚫 User Unwhitelisted")
-          .addFields({ name: "User", value: target.tag, inline: true }, { name: "Panel", value: name, inline: true })] });
+          .addFields(
+            { name: "User", value: target.tag, inline: true },
+            { name: "Panel", value: name, inline: true },
+            ...(panel.roleId ? [{ name: "Role", value: `<@&${panel.roleId}> removed`, inline: true }] : []),
+          )] });
         return;
       }
 
@@ -403,11 +415,13 @@ export const panelCommands = [
         await db.delete(panelWhitelist).where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, target.id)));
         await db.update(panelBlacklist).set({ active: false }).where(and(eq(panelBlacklist.panelId, panel.id), eq(panelBlacklist.userId, target.id)));
         await db.insert(panelBlacklist).values({ panelId: panel.id, userId: target.id, reason, blacklistedBy: interaction.user.id });
+        if (panel.roleId) await tryRemovePanelRole(interaction.guild!, target.id, panel.roleId);
         await interaction.reply({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle("🔨 User Blacklisted")
           .addFields(
             { name: "User", value: `${target.tag} (${target.id})`, inline: true },
             { name: "Panel", value: name, inline: true },
             { name: "Reason", value: reason },
+            ...(panel.roleId ? [{ name: "Role", value: `<@&${panel.roleId}> removed`, inline: true }] : []),
           )] });
         try {
           await target.send({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle("🔨 You have been blacklisted")
@@ -1112,12 +1126,13 @@ export const panelCommands = [
       // Deactivate the key
       await db.update(panelKeys).set({ active: false, expiresAt: new Date() }).where(eq(panelKeys.id, key.id));
 
-      // If the key was redeemed, remove the whitelist entry for that user
+      // If the key was redeemed, remove the whitelist entry and strip panel role
       let unwhitelistedUser: string | null = null;
       if (key.usedBy) {
         await db.delete(panelWhitelist)
           .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, key.usedBy)));
         unwhitelistedUser = key.usedBy;
+        if (panel.roleId) await tryRemovePanelRole(interaction.guild!, key.usedBy, panel.roleId);
       }
 
       const fields: { name: string; value: string; inline: boolean }[] = [
@@ -1127,6 +1142,7 @@ export const panelCommands = [
       ];
       if (unwhitelistedUser) {
         fields.push({ name: "Whitelist Entry", value: `<@${unwhitelistedUser}> removed from whitelist`, inline: false });
+        if (panel.roleId) fields.push({ name: "Role", value: `<@&${panel.roleId}> removed`, inline: true });
       }
 
       await interaction.reply({
