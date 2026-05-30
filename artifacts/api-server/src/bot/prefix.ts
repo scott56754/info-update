@@ -466,11 +466,17 @@ commands["bal"] = commands["balance"];
 
 // ── Export router ──────────────────────────────────────────────────────────
 
+const recentlyHandled = new Set<string>();
+
 export async function handlePrefixMessage(msg: Message, client: Client) {
   if (msg.author.bot || !msg.guild) return;
 
   const prefix = PREFIXES.find((p) => msg.content.startsWith(p));
   if (!prefix) return;
+
+  if (recentlyHandled.has(msg.id)) return;
+  recentlyHandled.add(msg.id);
+  setTimeout(() => recentlyHandled.delete(msg.id), 5000);
 
   const withoutPrefix = msg.content.slice(prefix.length).trim();
   if (!withoutPrefix) return;
