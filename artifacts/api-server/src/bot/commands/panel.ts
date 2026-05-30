@@ -353,13 +353,12 @@ export const panelCommands = [
         }).join("\n");
         const buf = Buffer.from(fileContent, "utf8");
         const file = new AttachmentBuilder(buf, { name: `keys-${name}.txt` });
-        return interaction.reply({
+        return interaction.editReply({
           content: `✅ Generated ${count} keys for **${name}**.${expiryNote}`,
           files: [file],
-          flags: MessageFlags.Ephemeral,
         });
       }
-      await interaction.reply({ content, flags: MessageFlags.Ephemeral });
+      await interaction.editReply({ content });
     },
   },
   {

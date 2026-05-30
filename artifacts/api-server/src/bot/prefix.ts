@@ -2,6 +2,7 @@ import {
   Message, Client, EmbedBuilder, PermissionFlagsBits,
   ChannelType, TextChannel,
   MessageFlags,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle,
 } from "discord.js";
 import { db } from "@workspace/db";
 import {
@@ -50,7 +51,7 @@ async function getPanel(guildId: string, name: string) {
 
 // ── command map ────────────────────────────────────────────────────────────
 
-type PrefixHandler = (msg: Message, args: string[], client: Client) => Promise<void>;
+type PrefixHandler = (msg: Message, args: string[], client: Client) => Promise<unknown>;
 
 const commands: Record<string, PrefixHandler> = {
 
@@ -132,7 +133,7 @@ const commands: Record<string, PrefixHandler> = {
     const n = parseInt(args[0]);
     if (isNaN(n) || n < 1 || n > 100) return reply(msg, "Usage: `purge <1-100>`");
     const deleted = await (msg.channel as TextChannel).bulkDelete(n + 1, true);
-    const notice = await msg.channel.send(`🗑️ Deleted **${deleted.size - 1}** messages.`);
+    const notice = await (msg.channel as TextChannel).send(`🗑️ Deleted **${deleted.size - 1}** messages.`);
     setTimeout(() => notice.delete().catch(() => {}), 4000);
   },
 
@@ -177,7 +178,6 @@ const commands: Record<string, PrefixHandler> = {
     if (!args[0]) return reply(msg, "Usage: `panel <name>`");
     const p = await getPanel(msg.guildId!, args[0]);
     if (!p) return reply(msg, `❌ No panel named **${args[0]}** found.`);
-    const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = await import("discord.js");
     const e = embed(0x2b2d31).setDescription(`**${p.name}**\n\n${p.description}`);
     const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(`panel:redeem:${p.name}`).setLabel("🔑 Redeem Key").setStyle(ButtonStyle.Success),
@@ -190,7 +190,7 @@ const commands: Record<string, PrefixHandler> = {
     const row3 = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(`panel:stats:${p.name}`).setLabel("📊 Get Stats").setStyle(ButtonStyle.Secondary),
     );
-    await msg.channel.send({ embeds: [e], components: [row1, row2, row3] });
+    await (msg.channel as TextChannel).send({ embeds: [e], components: [row1, row2, row3] });
   },
 
   createpanel: async (msg, args) => {
@@ -451,7 +451,7 @@ const commands: Record<string, PrefixHandler> = {
     if (!ticket) return reply(msg, "❌ This is not a ticket channel.");
     const isStaff = isOwner(msg.author.id) || (msg.member?.permissions.has(PermissionFlagsBits.ManageChannels) ?? false);
     if (!isStaff && ticket.userId !== msg.author.id) return reply(msg, "❌ Only the ticket owner or staff can close this.");
-    await msg.channel.send("🔒 Closing ticket in 5 seconds...");
+    await (msg.channel as TextChannel).send("🔒 Closing ticket in 5 seconds...");
     await db.update(tickets).set({ closedAt: new Date(), closedBy: msg.author.id })
       .where(eq(tickets.channelId, msg.channelId));
     setTimeout(() => msg.channel.delete().catch(() => {}), 5000);

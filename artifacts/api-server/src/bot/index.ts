@@ -1,7 +1,7 @@
 import {
   Client, GatewayIntentBits, Events, REST, Routes,
   ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder,
-  EmbedBuilder, type Logger,
+  EmbedBuilder,
   MessageFlags,
 } from "discord.js";
 import { logger } from "../lib/logger.js";
@@ -237,9 +237,9 @@ async function setupAndLogin(
         await command.execute(interaction, client);
       } catch (err) {
         logger.error({ err, command: interaction.commandName }, "Command error");
-        const msg = { content: "An error occurred while running this command.", flags: MessageFlags.Ephemeral };
-        if (interaction.replied || interaction.deferred) await interaction.followUp(msg).catch(() => {});
-        else await interaction.reply(msg).catch(() => {});
+        const errOpts = { content: "An error occurred while running this command.", ephemeral: true } as const;
+        if (interaction.replied || interaction.deferred) await interaction.followUp(errOpts).catch(() => {});
+        else await interaction.reply(errOpts).catch(() => {});
       }
       return;
     }

@@ -315,7 +315,7 @@ export const setupCommands = [
       const category = interaction.options.getChannel("category", true);
       const logs = interaction.options.getChannel("logs");
       await upsertSettings(interaction.guildId!, { ticketCategory: category.id, ticketLogChannel: logs?.id ?? null });
-      await interaction.reply({ embeds: [setupEmbed(0x57f287).setTitle("🎫 Ticket System Set Up").addFields({ name: "Category", value: category.name, inline: true }, { name: "Logs", value: logs ? `${logs}` : "None", inline: true })] });
+      await interaction.reply({ embeds: [setupEmbed(0x57f287).setTitle("🎫 Ticket System Set Up").addFields({ name: "Category", value: category.name ?? category.id, inline: true }, { name: "Logs", value: logs ? `${logs}` : "None", inline: true })] });
     },
   },
   {

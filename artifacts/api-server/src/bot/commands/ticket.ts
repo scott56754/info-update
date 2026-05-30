@@ -142,7 +142,7 @@ export const ticketCommands = [
       const cat = interaction.options.getChannel("category", true);
       await upsertSettings(interaction.guildId!, { categoryId: cat.id });
       const embed = new EmbedBuilder().setColor(0x57f287).setTitle("✅ Ticket Category Set")
-        .addFields({ name: "Category", value: cat.name, inline: true });
+        .addFields({ name: "Category", value: cat.name ?? cat.id, inline: true });
       await interaction.reply({ embeds: [embed] });
     },
   },
