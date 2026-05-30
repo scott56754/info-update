@@ -165,14 +165,19 @@ export const panelCommands = [
   {
     data: new SlashCommandBuilder()
       .setName("whitelist")
-      .setDescription("Whitelist a user for a panel")
-      .addStringOption((o) => o.setName("panel").setDescription("Panel name").setRequired(true))
-      .addUserOption((o) => o.setName("user").setDescription("User to whitelist").setRequired(true))
-      .addStringOption((o) => o.setName("duration").setDescription("How long access lasts e.g. 7d, 30d, 1h (leave blank for permanent)").setRequired(false)),
+      .setDescription("Whitelist a user or role for a panel")
+      .addSubcommand((s) => s.setName("user").setDescription("Whitelist a specific user")
+        .addStringOption((o) => o.setName("panel").setDescription("Panel name").setRequired(true))
+        .addUserOption((o) => o.setName("user").setDescription("User to whitelist").setRequired(true))
+        .addStringOption((o) => o.setName("duration").setDescription("How long e.g. 7d, 30d, 1h (blank = permanent)").setRequired(false)))
+      .addSubcommand((s) => s.setName("role").setDescription("Whitelist an entire role")
+        .addStringOption((o) => o.setName("panel").setDescription("Panel name").setRequired(true))
+        .addRoleOption((o) => o.setName("role").setDescription("Role to whitelist").setRequired(true))
+        .addStringOption((o) => o.setName("duration").setDescription("How long e.g. 7d, 30d, 1h (blank = permanent)").setRequired(false))),
     async execute(interaction: ChatInputCommandInteraction) {
       if (!ownerOnly(interaction)) return;
+      const sub = interaction.options.getSubcommand();
       const name = interaction.options.getString("panel", true).toLowerCase();
-      const target = interaction.options.getUser("user", true);
       const durationStr = interaction.options.getString("duration");
       const panel = await getPanel(interaction.guildId!, name);
       if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, flags: MessageFlags.Ephemeral });
@@ -180,264 +185,178 @@ export const panelCommands = [
       let expiresAt: Date | null = null;
       if (durationStr) {
         const ms = parseDuration(durationStr);
-        if (!ms) return interaction.reply({ content: "❌ Invalid duration format. Use e.g. `7d`, `30d`, `24h`.", flags: MessageFlags.Ephemeral });
+        if (!ms) return interaction.reply({ content: "❌ Invalid duration. Use e.g. `7d`, `30d`, `24h`.", flags: MessageFlags.Ephemeral });
         expiresAt = new Date(Date.now() + ms);
       }
 
-      const [existing] = await db.select().from(panelWhitelist)
-        .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, target.id)));
-      if (existing) return interaction.reply({ content: `❌ ${target.tag} is already whitelisted for **${name}**.`, flags: MessageFlags.Ephemeral });
+      if (sub === "user") {
+        const target = interaction.options.getUser("user", true);
+        const [existing] = await db.select().from(panelWhitelist)
+          .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, target.id)));
+        if (existing) return interaction.reply({ content: `❌ ${target.tag} is already whitelisted for **${name}**.`, flags: MessageFlags.Ephemeral });
+        const [bl] = await db.select().from(panelBlacklist)
+          .where(and(eq(panelBlacklist.panelId, panel.id), eq(panelBlacklist.userId, target.id), eq(panelBlacklist.active, true)));
+        if (bl) return interaction.reply({ content: `❌ ${target.tag} is blacklisted from **${name}**. Unblacklist them first.`, flags: MessageFlags.Ephemeral });
+        await db.insert(panelWhitelist).values({ panelId: panel.id, userId: target.id, whitelistedBy: interaction.user.id, expiresAt });
+        const embed = new EmbedBuilder().setColor(0x57f287).setTitle("✅ User Whitelisted")
+          .addFields(
+            { name: "User", value: `${target.tag} (${target.id})`, inline: true },
+            { name: "Panel", value: name, inline: true },
+            { name: "By", value: interaction.user.tag, inline: true },
+            { name: "Expires", value: expiresAt ? `<t:${Math.floor(expiresAt.getTime() / 1000)}:R>` : "Never (permanent)", inline: true },
+          );
+        await interaction.reply({ embeds: [embed] });
+        try {
+          await target.send({ embeds: [new EmbedBuilder().setColor(0x57f287).setTitle("✅ You have been whitelisted!")
+            .setDescription(`You have been whitelisted for the **${name}** script.\nYou can access the script via the panel in the server.`)
+            .addFields({ name: "Expires", value: expiresAt ? `<t:${Math.floor(expiresAt.getTime() / 1000)}:R>` : "Never (permanent)", inline: true })
+            .setTimestamp()] });
+        } catch {}
+        return;
+      }
 
-      const [bl] = await db.select().from(panelBlacklist)
-        .where(and(eq(panelBlacklist.panelId, panel.id), eq(panelBlacklist.userId, target.id), eq(panelBlacklist.active, true)));
-      if (bl) return interaction.reply({ content: `❌ ${target.tag} is blacklisted from **${name}**. Unblacklist them first.`, flags: MessageFlags.Ephemeral });
-
-      await db.insert(panelWhitelist).values({
-        panelId: panel.id,
-        userId: target.id,
-        whitelistedBy: interaction.user.id,
-        expiresAt,
-      });
-
-      const embed = new EmbedBuilder().setColor(0x57f287).setTitle("✅ User Whitelisted")
-        .addFields(
-          { name: "User", value: `${target.tag} (${target.id})`, inline: true },
-          { name: "Panel", value: name, inline: true },
-          { name: "By", value: interaction.user.tag, inline: true },
-          { name: "Expires", value: expiresAt ? `<t:${Math.floor(expiresAt.getTime() / 1000)}:R>` : "Never (permanent)", inline: true },
-        );
-      await interaction.reply({ embeds: [embed] });
-
-      try {
-        const dmEmbed = new EmbedBuilder().setColor(0x57f287)
-          .setTitle("✅ You have been whitelisted!")
-          .setDescription(
-            `You have been whitelisted for the **${name}** script.\nYou can access the script via the panel in the server.`
+      if (sub === "role") {
+        const role = interaction.options.getRole("role", true);
+        const [existing] = await db.select().from(panelRoleWhitelist)
+          .where(and(eq(panelRoleWhitelist.panelId, panel.id), eq(panelRoleWhitelist.roleId, role.id)));
+        if (existing) return interaction.reply({ content: `❌ <@&${role.id}> is already whitelisted for **${name}**.`, flags: MessageFlags.Ephemeral });
+        const [bl] = await db.select().from(panelRoleBlacklist)
+          .where(and(eq(panelRoleBlacklist.panelId, panel.id), eq(panelRoleBlacklist.roleId, role.id), eq(panelRoleBlacklist.active, true)));
+        if (bl) return interaction.reply({ content: `❌ <@&${role.id}> is blacklisted from **${name}**. Remove the role blacklist first.`, flags: MessageFlags.Ephemeral });
+        await db.insert(panelRoleWhitelist).values({ panelId: panel.id, roleId: role.id, whitelistedBy: interaction.user.id, expiresAt });
+        const embed = new EmbedBuilder().setColor(0x57f287).setTitle("✅ Role Whitelisted")
+          .addFields(
+            { name: "Role", value: `<@&${role.id}> (${role.name})`, inline: true },
+            { name: "Panel", value: name, inline: true },
+            { name: "By", value: interaction.user.tag, inline: true },
+            { name: "Expires", value: expiresAt ? `<t:${Math.floor(expiresAt.getTime() / 1000)}:R>` : "Never (permanent)", inline: true },
           )
-          .addFields({ name: "Expires", value: expiresAt ? `<t:${Math.floor(expiresAt.getTime() / 1000)}:R>` : "Never (permanent)", inline: true })
-          .setTimestamp();
-        await target.send({ embeds: [dmEmbed] });
-      } catch {}
+          .setFooter({ text: "All members with this role can now access the panel." });
+        await interaction.reply({ embeds: [embed] });
+      }
     },
   },
   {
     data: new SlashCommandBuilder()
       .setName("unwhitelist")
-      .setDescription("Remove a user from the whitelist for a panel")
-      .addStringOption((o) => o.setName("panel").setDescription("Panel name").setRequired(true))
-      .addUserOption((o) => o.setName("user").setDescription("User to remove").setRequired(true)),
+      .setDescription("Remove a user or role from the whitelist for a panel")
+      .addSubcommand((s) => s.setName("user").setDescription("Remove a specific user")
+        .addStringOption((o) => o.setName("panel").setDescription("Panel name").setRequired(true))
+        .addUserOption((o) => o.setName("user").setDescription("User to remove").setRequired(true)))
+      .addSubcommand((s) => s.setName("role").setDescription("Remove a role")
+        .addStringOption((o) => o.setName("panel").setDescription("Panel name").setRequired(true))
+        .addRoleOption((o) => o.setName("role").setDescription("Role to remove").setRequired(true))),
     async execute(interaction: ChatInputCommandInteraction) {
       if (!ownerOnly(interaction)) return;
+      const sub = interaction.options.getSubcommand();
       const name = interaction.options.getString("panel", true).toLowerCase();
-      const target = interaction.options.getUser("user", true);
       const panel = await getPanel(interaction.guildId!, name);
       if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, flags: MessageFlags.Ephemeral });
 
-      const deleted = await db.delete(panelWhitelist)
-        .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, target.id)))
-        .returning();
-      if (!deleted.length) return interaction.reply({ content: `❌ ${target.tag} is not whitelisted for **${name}**.`, flags: MessageFlags.Ephemeral });
+      if (sub === "user") {
+        const target = interaction.options.getUser("user", true);
+        const deleted = await db.delete(panelWhitelist)
+          .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, target.id))).returning();
+        if (!deleted.length) return interaction.reply({ content: `❌ ${target.tag} is not whitelisted for **${name}**.`, flags: MessageFlags.Ephemeral });
+        await interaction.reply({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle("🚫 User Unwhitelisted")
+          .addFields({ name: "User", value: target.tag, inline: true }, { name: "Panel", value: name, inline: true })] });
+        return;
+      }
 
-      const embed = new EmbedBuilder().setColor(0xed4245).setTitle("🚫 User Unwhitelisted")
-        .addFields({ name: "User", value: target.tag, inline: true }, { name: "Panel", value: name, inline: true });
-      await interaction.reply({ embeds: [embed] });
+      if (sub === "role") {
+        const role = interaction.options.getRole("role", true);
+        const deleted = await db.delete(panelRoleWhitelist)
+          .where(and(eq(panelRoleWhitelist.panelId, panel.id), eq(panelRoleWhitelist.roleId, role.id))).returning();
+        if (!deleted.length) return interaction.reply({ content: `❌ <@&${role.id}> is not whitelisted for **${name}**.`, flags: MessageFlags.Ephemeral });
+        await interaction.reply({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle("🚫 Role Unwhitelisted")
+          .addFields({ name: "Role", value: `<@&${role.id}> (${role.name})`, inline: true }, { name: "Panel", value: name, inline: true })] });
+      }
     },
   },
   {
     data: new SlashCommandBuilder()
       .setName("blacklist")
-      .setDescription("Blacklist a user from a panel")
-      .addStringOption((o) => o.setName("panel").setDescription("Panel name").setRequired(true))
-      .addUserOption((o) => o.setName("user").setDescription("User to blacklist").setRequired(true))
-      .addStringOption((o) => o.setName("reason").setDescription("Reason").setRequired(false)),
+      .setDescription("Blacklist a user or role from a panel")
+      .addSubcommand((s) => s.setName("user").setDescription("Blacklist a specific user")
+        .addStringOption((o) => o.setName("panel").setDescription("Panel name").setRequired(true))
+        .addUserOption((o) => o.setName("user").setDescription("User to blacklist").setRequired(true))
+        .addStringOption((o) => o.setName("reason").setDescription("Reason").setRequired(false)))
+      .addSubcommand((s) => s.setName("role").setDescription("Blacklist an entire role")
+        .addStringOption((o) => o.setName("panel").setDescription("Panel name").setRequired(true))
+        .addRoleOption((o) => o.setName("role").setDescription("Role to blacklist").setRequired(true))
+        .addStringOption((o) => o.setName("reason").setDescription("Reason").setRequired(false))),
     async execute(interaction: ChatInputCommandInteraction) {
       if (!ownerOnly(interaction)) return;
+      const sub = interaction.options.getSubcommand();
       const name = interaction.options.getString("panel", true).toLowerCase();
-      const target = interaction.options.getUser("user", true);
       const reason = interaction.options.getString("reason") ?? "No reason provided";
       const panel = await getPanel(interaction.guildId!, name);
       if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, flags: MessageFlags.Ephemeral });
 
-      await db.delete(panelWhitelist)
-        .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, target.id)));
-
-      await db.update(panelBlacklist).set({ active: false })
-        .where(and(eq(panelBlacklist.panelId, panel.id), eq(panelBlacklist.userId, target.id)));
-      await db.insert(panelBlacklist).values({
-        panelId: panel.id,
-        userId: target.id,
-        reason,
-        blacklistedBy: interaction.user.id,
-      });
-
-      const embed = new EmbedBuilder().setColor(0xed4245).setTitle("🔨 User Blacklisted")
-        .addFields(
-          { name: "User", value: `${target.tag} (${target.id})`, inline: true },
-          { name: "Panel", value: name, inline: true },
-          { name: "Reason", value: reason }
-        );
-      await interaction.reply({ embeds: [embed] });
-
-      try {
-        const dmEmbed = new EmbedBuilder().setColor(0xed4245)
-          .setTitle("🔨 You have been blacklisted")
+      if (sub === "user") {
+        const target = interaction.options.getUser("user", true);
+        await db.delete(panelWhitelist).where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, target.id)));
+        await db.update(panelBlacklist).set({ active: false }).where(and(eq(panelBlacklist.panelId, panel.id), eq(panelBlacklist.userId, target.id)));
+        await db.insert(panelBlacklist).values({ panelId: panel.id, userId: target.id, reason, blacklistedBy: interaction.user.id });
+        await interaction.reply({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle("🔨 User Blacklisted")
           .addFields(
+            { name: "User", value: `${target.tag} (${target.id})`, inline: true },
             { name: "Panel", value: name, inline: true },
-            { name: "Reason", value: reason }
+            { name: "Reason", value: reason },
+          )] });
+        try {
+          await target.send({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle("🔨 You have been blacklisted")
+            .addFields({ name: "Panel", value: name, inline: true }, { name: "Reason", value: reason }).setTimestamp()] });
+        } catch {}
+        return;
+      }
+
+      if (sub === "role") {
+        const role = interaction.options.getRole("role", true);
+        await db.delete(panelRoleWhitelist).where(and(eq(panelRoleWhitelist.panelId, panel.id), eq(panelRoleWhitelist.roleId, role.id)));
+        await db.update(panelRoleBlacklist).set({ active: false }).where(and(eq(panelRoleBlacklist.panelId, panel.id), eq(panelRoleBlacklist.roleId, role.id)));
+        await db.insert(panelRoleBlacklist).values({ panelId: panel.id, roleId: role.id, reason, blacklistedBy: interaction.user.id });
+        await interaction.reply({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle("🔨 Role Blacklisted")
+          .addFields(
+            { name: "Role", value: `<@&${role.id}> (${role.name})`, inline: true },
+            { name: "Panel", value: name, inline: true },
+            { name: "Reason", value: reason },
           )
-          .setTimestamp();
-        await target.send({ embeds: [dmEmbed] });
-      } catch {}
+          .setFooter({ text: "All members with this role are now denied access." })] });
+      }
     },
   },
   {
     data: new SlashCommandBuilder()
       .setName("unblacklist")
-      .setDescription("Remove a user from the blacklist for a panel")
-      .addStringOption((o) => o.setName("panel").setDescription("Panel name").setRequired(true))
-      .addUserOption((o) => o.setName("user").setDescription("User to unblacklist").setRequired(true)),
+      .setDescription("Remove a user or role from the blacklist for a panel")
+      .addSubcommand((s) => s.setName("user").setDescription("Remove a specific user")
+        .addStringOption((o) => o.setName("panel").setDescription("Panel name").setRequired(true))
+        .addUserOption((o) => o.setName("user").setDescription("User to unblacklist").setRequired(true)))
+      .addSubcommand((s) => s.setName("role").setDescription("Remove a role")
+        .addStringOption((o) => o.setName("panel").setDescription("Panel name").setRequired(true))
+        .addRoleOption((o) => o.setName("role").setDescription("Role to unblacklist").setRequired(true))),
     async execute(interaction: ChatInputCommandInteraction) {
       if (!ownerOnly(interaction)) return;
+      const sub = interaction.options.getSubcommand();
       const name = interaction.options.getString("panel", true).toLowerCase();
-      const target = interaction.options.getUser("user", true);
       const panel = await getPanel(interaction.guildId!, name);
       if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, flags: MessageFlags.Ephemeral });
 
-      await db.update(panelBlacklist).set({ active: false })
-        .where(and(eq(panelBlacklist.panelId, panel.id), eq(panelBlacklist.userId, target.id)));
-
-      const embed = new EmbedBuilder().setColor(0x57f287).setTitle("✅ User Unblacklisted")
-        .addFields({ name: "User", value: target.tag, inline: true }, { name: "Panel", value: name, inline: true });
-      await interaction.reply({ embeds: [embed] });
-    },
-  },
-  {
-    data: new SlashCommandBuilder()
-      .setName("whitelistrole")
-      .setDescription("Whitelist a role for a panel — all members with this role gain access")
-      .addStringOption((o) => o.setName("panel").setDescription("Panel name").setRequired(true))
-      .addRoleOption((o) => o.setName("role").setDescription("Role to whitelist").setRequired(true))
-      .addStringOption((o) => o.setName("duration").setDescription("How long access lasts e.g. 7d, 30d, 1h (leave blank for permanent)").setRequired(false)),
-    async execute(interaction: ChatInputCommandInteraction) {
-      if (!ownerOnly(interaction)) return;
-      const name = interaction.options.getString("panel", true).toLowerCase();
-      const role = interaction.options.getRole("role", true);
-      const durationStr = interaction.options.getString("duration");
-      const panel = await getPanel(interaction.guildId!, name);
-      if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, flags: MessageFlags.Ephemeral });
-
-      let expiresAt: Date | null = null;
-      if (durationStr) {
-        const ms = parseDuration(durationStr);
-        if (!ms) return interaction.reply({ content: "❌ Invalid duration format. Use e.g. `7d`, `30d`, `24h`.", flags: MessageFlags.Ephemeral });
-        expiresAt = new Date(Date.now() + ms);
+      if (sub === "user") {
+        const target = interaction.options.getUser("user", true);
+        await db.update(panelBlacklist).set({ active: false }).where(and(eq(panelBlacklist.panelId, panel.id), eq(panelBlacklist.userId, target.id)));
+        await interaction.reply({ embeds: [new EmbedBuilder().setColor(0x57f287).setTitle("✅ User Unblacklisted")
+          .addFields({ name: "User", value: target.tag, inline: true }, { name: "Panel", value: name, inline: true })] });
+        return;
       }
 
-      const [existing] = await db.select().from(panelRoleWhitelist)
-        .where(and(eq(panelRoleWhitelist.panelId, panel.id), eq(panelRoleWhitelist.roleId, role.id)));
-      if (existing) return interaction.reply({ content: `❌ <@&${role.id}> is already whitelisted for **${name}**.`, flags: MessageFlags.Ephemeral });
-
-      const [bl] = await db.select().from(panelRoleBlacklist)
-        .where(and(eq(panelRoleBlacklist.panelId, panel.id), eq(panelRoleBlacklist.roleId, role.id), eq(panelRoleBlacklist.active, true)));
-      if (bl) return interaction.reply({ content: `❌ <@&${role.id}> is blacklisted from **${name}**. Remove the role blacklist first.`, flags: MessageFlags.Ephemeral });
-
-      await db.insert(panelRoleWhitelist).values({
-        panelId: panel.id,
-        roleId: role.id,
-        whitelistedBy: interaction.user.id,
-        expiresAt,
-      });
-
-      const embed = new EmbedBuilder().setColor(0x57f287).setTitle("✅ Role Whitelisted")
-        .addFields(
-          { name: "Role", value: `<@&${role.id}> (${role.name})`, inline: true },
-          { name: "Panel", value: name, inline: true },
-          { name: "By", value: interaction.user.tag, inline: true },
-          { name: "Expires", value: expiresAt ? `<t:${Math.floor(expiresAt.getTime() / 1000)}:R>` : "Never (permanent)", inline: true },
-        )
-        .setFooter({ text: "All members with this role can now access the panel." });
-      await interaction.reply({ embeds: [embed] });
-    },
-  },
-  {
-    data: new SlashCommandBuilder()
-      .setName("unwhitelistrole")
-      .setDescription("Remove a role from the whitelist for a panel")
-      .addStringOption((o) => o.setName("panel").setDescription("Panel name").setRequired(true))
-      .addRoleOption((o) => o.setName("role").setDescription("Role to remove").setRequired(true)),
-    async execute(interaction: ChatInputCommandInteraction) {
-      if (!ownerOnly(interaction)) return;
-      const name = interaction.options.getString("panel", true).toLowerCase();
-      const role = interaction.options.getRole("role", true);
-      const panel = await getPanel(interaction.guildId!, name);
-      if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, flags: MessageFlags.Ephemeral });
-
-      const deleted = await db.delete(panelRoleWhitelist)
-        .where(and(eq(panelRoleWhitelist.panelId, panel.id), eq(panelRoleWhitelist.roleId, role.id)))
-        .returning();
-      if (!deleted.length) return interaction.reply({ content: `❌ <@&${role.id}> is not whitelisted for **${name}**.`, flags: MessageFlags.Ephemeral });
-
-      const embed = new EmbedBuilder().setColor(0xed4245).setTitle("🚫 Role Unwhitelisted")
-        .addFields({ name: "Role", value: `<@&${role.id}> (${role.name})`, inline: true }, { name: "Panel", value: name, inline: true });
-      await interaction.reply({ embeds: [embed] });
-    },
-  },
-  {
-    data: new SlashCommandBuilder()
-      .setName("blacklistrole")
-      .setDescription("Blacklist a role from a panel — all members with this role are denied access")
-      .addStringOption((o) => o.setName("panel").setDescription("Panel name").setRequired(true))
-      .addRoleOption((o) => o.setName("role").setDescription("Role to blacklist").setRequired(true))
-      .addStringOption((o) => o.setName("reason").setDescription("Reason").setRequired(false)),
-    async execute(interaction: ChatInputCommandInteraction) {
-      if (!ownerOnly(interaction)) return;
-      const name = interaction.options.getString("panel", true).toLowerCase();
-      const role = interaction.options.getRole("role", true);
-      const reason = interaction.options.getString("reason") ?? "No reason provided";
-      const panel = await getPanel(interaction.guildId!, name);
-      if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, flags: MessageFlags.Ephemeral });
-
-      await db.delete(panelRoleWhitelist)
-        .where(and(eq(panelRoleWhitelist.panelId, panel.id), eq(panelRoleWhitelist.roleId, role.id)));
-
-      await db.update(panelRoleBlacklist).set({ active: false })
-        .where(and(eq(panelRoleBlacklist.panelId, panel.id), eq(panelRoleBlacklist.roleId, role.id)));
-      await db.insert(panelRoleBlacklist).values({
-        panelId: panel.id,
-        roleId: role.id,
-        reason,
-        blacklistedBy: interaction.user.id,
-      });
-
-      const embed = new EmbedBuilder().setColor(0xed4245).setTitle("🔨 Role Blacklisted")
-        .addFields(
-          { name: "Role", value: `<@&${role.id}> (${role.name})`, inline: true },
-          { name: "Panel", value: name, inline: true },
-          { name: "Reason", value: reason }
-        )
-        .setFooter({ text: "All members with this role are now denied access." });
-      await interaction.reply({ embeds: [embed] });
-    },
-  },
-  {
-    data: new SlashCommandBuilder()
-      .setName("unblacklistrole")
-      .setDescription("Remove a role from the blacklist for a panel")
-      .addStringOption((o) => o.setName("panel").setDescription("Panel name").setRequired(true))
-      .addRoleOption((o) => o.setName("role").setDescription("Role to unblacklist").setRequired(true)),
-    async execute(interaction: ChatInputCommandInteraction) {
-      if (!ownerOnly(interaction)) return;
-      const name = interaction.options.getString("panel", true).toLowerCase();
-      const role = interaction.options.getRole("role", true);
-      const panel = await getPanel(interaction.guildId!, name);
-      if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, flags: MessageFlags.Ephemeral });
-
-      await db.update(panelRoleBlacklist).set({ active: false })
-        .where(and(eq(panelRoleBlacklist.panelId, panel.id), eq(panelRoleBlacklist.roleId, role.id)));
-
-      const embed = new EmbedBuilder().setColor(0x57f287).setTitle("✅ Role Unblacklisted")
-        .addFields({ name: "Role", value: `<@&${role.id}> (${role.name})`, inline: true }, { name: "Panel", value: name, inline: true });
-      await interaction.reply({ embeds: [embed] });
+      if (sub === "role") {
+        const role = interaction.options.getRole("role", true);
+        await db.update(panelRoleBlacklist).set({ active: false }).where(and(eq(panelRoleBlacklist.panelId, panel.id), eq(panelRoleBlacklist.roleId, role.id)));
+        await interaction.reply({ embeds: [new EmbedBuilder().setColor(0x57f287).setTitle("✅ Role Unblacklisted")
+          .addFields({ name: "Role", value: `<@&${role.id}> (${role.name})`, inline: true }, { name: "Panel", value: name, inline: true })] });
+      }
     },
   },
   {
