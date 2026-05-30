@@ -898,11 +898,12 @@ export const panelCommands = [
       const panel = await getPanel(interaction.guildId!, name);
       if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, flags: MessageFlags.Ephemeral });
 
-      const [wlUsers, wlRoles, blUsers, blRoles] = await Promise.all([
+      const [wlUsers, wlRoles, blUsers, blRoles, unusedKeys] = await Promise.all([
         db.select().from(panelWhitelist).where(eq(panelWhitelist.panelId, panel.id)),
         db.select().from(panelRoleWhitelist).where(eq(panelRoleWhitelist.panelId, panel.id)),
         db.select().from(panelBlacklist).where(and(eq(panelBlacklist.panelId, panel.id), eq(panelBlacklist.active, true))),
         db.select().from(panelRoleBlacklist).where(and(eq(panelRoleBlacklist.panelId, panel.id), eq(panelRoleBlacklist.active, true))),
+        db.select().from(panelKeys).where(and(eq(panelKeys.panelId, panel.id), eq(panelKeys.active, true))),
       ]);
 
       const now = new Date();
@@ -923,6 +924,13 @@ export const panelCommands = [
       const blUserLines = blUsers.map((e) => `<@${e.userId}> — ${e.reason}`);
       const blRoleLines = blRoles.map((e) => `<@&${e.roleId}> — ${e.reason}`);
 
+      // Unredeemed keys — filter out keys already used (usedBy set) and show remaining ones
+      const redeemedCodes = new Set(wlUsers.map((u) => u.keyCode).filter(Boolean));
+      const unredeemedKeys = unusedKeys.filter((k) => !k.usedBy && !redeemedCodes.has(k.keyCode));
+      const unusedKeyLines = unredeemedKeys.map((k) =>
+        `\`${k.keyCode}\` | ${fmtExpiry(k.expiresAt)}`
+      );
+
       const totalWl = wlUsers.length + wlRoles.length;
       const totalBl = blUsers.length + blRoles.length;
 
@@ -934,6 +942,9 @@ export const panelCommands = [
         `=== WHITELISTED ROLES (${wlRoles.length}) ===`,
         ...(wlRoleLines.length ? wlRoleLines : ["None"]),
         "",
+        `=== UNREDEEMED KEYS (${unredeemedKeys.length}) ===`,
+        ...(unusedKeyLines.length ? unusedKeyLines : ["None"]),
+        "",
         `=== BLACKLISTED USERS (${blUsers.length}) ===`,
         ...(blUserLines.length ? blUserLines : ["None"]),
         "",
@@ -943,7 +954,7 @@ export const panelCommands = [
 
       if (wlUsers.length > 30 || fullText.length > 3500) {
         const file = new AttachmentBuilder(Buffer.from(fullText, "utf8"), { name: `access-${name}.txt` });
-        return interaction.reply({ content: `**${totalWl}** whitelisted · **${totalBl}** blacklisted`, files: [file], flags: MessageFlags.Ephemeral });
+        return interaction.reply({ content: `**${totalWl}** whitelisted · **${unredeemedKeys.length}** unredeemed keys · **${totalBl}** blacklisted`, files: [file], flags: MessageFlags.Ephemeral });
       }
 
       const cap = (lines: string[], fallback: string) => {
@@ -957,10 +968,11 @@ export const panelCommands = [
         .addFields(
           { name: `✅ Whitelisted Users (${wlUsers.length})`, value: cap(wlUserLines, "_None_"), inline: false },
           { name: `✅ Whitelisted Roles (${wlRoles.length})`, value: cap(wlRoleLines, "_None_"), inline: false },
+          { name: `🔑 Unredeemed Keys (${unredeemedKeys.length})`, value: cap(unusedKeyLines, "_None_"), inline: false },
           { name: `🔨 Blacklisted Users (${blUsers.length})`, value: cap(blUserLines, "_None_"), inline: false },
           { name: `🔨 Blacklisted Roles (${blRoles.length})`, value: cap(blRoleLines, "_None_"), inline: false },
         )
-        .setFooter({ text: `Total: ${totalWl} whitelisted · ${totalBl} blacklisted` })
+        .setFooter({ text: `Total: ${totalWl} whitelisted · ${unredeemedKeys.length} unredeemed keys · ${totalBl} blacklisted` })
         .setTimestamp();
 
       await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
