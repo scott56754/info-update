@@ -175,6 +175,7 @@ async function setupAndLogin(
     startReminderLoop(client);
     startGiveawayLoop(client);
     setupAntiNuke(client);
+    startWhitelistExpiryLoop(client);
   });
 
   // Prefix commands (.!?) — requires Message Content Intent
@@ -506,6 +507,40 @@ async function handlePanelRedeem(interaction: any, client: Client, panelName: st
       });
     } catch {}
   }
+}
+
+// ── Whitelist expiry loop ───────────────────────────────────────────────────
+
+async function startWhitelistExpiryLoop(client: Client) {
+  const run = async () => {
+    try {
+      const expired = await db.select().from(panelWhitelist)
+        .where(lt(panelWhitelist.expiresAt, new Date()));
+      for (const entry of expired) {
+        try {
+          // Get panel to find guildId and the role to strip
+          const [panel] = await db.select().from(panels).where(eq(panels.id, entry.panelId));
+          if (panel) {
+            const guild = client.guilds.cache.get(panel.guildId);
+            if (guild && panel.roleId) {
+              try {
+                const member = await guild.members.fetch(entry.userId);
+                if (member.roles.cache.has(panel.roleId)) {
+                  await member.roles.remove(panel.roleId, "Whitelist key expired");
+                }
+              } catch {}
+            }
+          }
+          // Remove the expired whitelist entry
+          await db.delete(panelWhitelist)
+            .where(eq(panelWhitelist.id, entry.id));
+        } catch {}
+      }
+    } catch {}
+  };
+  // Run once immediately on startup, then every 60 seconds
+  await run();
+  setInterval(run, 60_000);
 }
 
 // ── Reminder loop ──────────────────────────────────────────────────────────
