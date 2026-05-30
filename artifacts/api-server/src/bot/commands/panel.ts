@@ -1089,4 +1089,51 @@ export const panelCommands = [
       });
     },
   },
+  {
+    data: new SlashCommandBuilder()
+      .setName("expirekey")
+      .setDescription("Expire (revoke) a key for a panel by its code")
+      .addStringOption((o) => o.setName("panel").setDescription("Panel name").setRequired(true))
+      .addStringOption((o) => o.setName("key").setDescription("Key code to expire").setRequired(true)),
+    async execute(interaction: ChatInputCommandInteraction) {
+      if (!ownerOnly(interaction)) return;
+      const name = interaction.options.getString("panel", true).toLowerCase();
+      const keyCode = interaction.options.getString("key", true).trim().toUpperCase();
+      const panel = await getPanel(interaction.guildId!, name);
+      if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, flags: MessageFlags.Ephemeral });
+
+      const [key] = await db.select().from(panelKeys)
+        .where(and(eq(panelKeys.panelId, panel.id), eq(panelKeys.keyCode, keyCode)));
+      if (!key) return interaction.reply({ content: `❌ Key \`${keyCode}\` not found on panel **${name}**.`, flags: MessageFlags.Ephemeral });
+      if (!key.active) return interaction.reply({ content: `⚠️ Key \`${keyCode}\` is already revoked/expired.`, flags: MessageFlags.Ephemeral });
+
+      // Deactivate the key
+      await db.update(panelKeys).set({ active: false, expiresAt: new Date() }).where(eq(panelKeys.id, key.id));
+
+      // If the key was redeemed, remove the whitelist entry for that user
+      let unwhitelistedUser: string | null = null;
+      if (key.usedBy) {
+        await db.delete(panelWhitelist)
+          .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, key.usedBy)));
+        unwhitelistedUser = key.usedBy;
+      }
+
+      const fields: { name: string; value: string; inline: boolean }[] = [
+        { name: "Panel", value: name, inline: true },
+        { name: "Key", value: `\`${keyCode}\``, inline: true },
+        { name: "Was Redeemed", value: key.usedBy ? `Yes — <@${key.usedBy}>` : "No (unredeemed)", inline: true },
+      ];
+      if (unwhitelistedUser) {
+        fields.push({ name: "Whitelist Entry", value: `<@${unwhitelistedUser}> removed from whitelist`, inline: false });
+      }
+
+      await interaction.reply({
+        embeds: [new EmbedBuilder()
+          .setColor(0xed4245)
+          .setTitle("🗑️ Key Expired")
+          .addFields(...fields)
+          .setTimestamp()],
+      });
+    },
+  },
 ];
