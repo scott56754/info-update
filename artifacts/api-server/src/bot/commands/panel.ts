@@ -343,7 +343,7 @@ export const panelCommands = [
           embeds: [new EmbedBuilder()
             .setColor(0xed4245)
             .setTitle("🗑️ Whitelist Wiped")
-            .setDescription(`All whitelisted users and roles have been removed from **${name}**.`)
+            .setDescription(`All whitelisted users and roles have been removed from **${name}**.\n\n⚠️ **Discord roles were NOT removed** — users keep their roles in the server.`)
             .addFields(
               { name: "Users Removed", value: `${usersBefore.length}`, inline: true },
               { name: "Roles Removed", value: `${rolesBefore.length}`, inline: true },
