@@ -7,7 +7,7 @@ import { db } from "@workspace/db";
 import { guildSettings } from "@workspace/db";
 import { eq } from "drizzle-orm";
 
-const OWNERS = ["1417552037717086355", "1501051958629503097"];
+const OWNERS = ["1417552037717086355", "1501051958629503097", "1101996899453632534"];
 function ownerOnly(i: ChatInputCommandInteraction) {
   if (!OWNERS.includes(i.user.id)) {
     i.reply({ content: "❌ You are not authorized to use this command.", flags: MessageFlags.Ephemeral });

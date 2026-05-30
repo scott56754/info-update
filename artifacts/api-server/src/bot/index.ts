@@ -23,7 +23,7 @@ import { antiNukeCommands, setupAntiNuke } from "./commands/antinuke.js";
 import { generateKey, buildLoader } from "./utils/obfuscate.js";
 import { handlePrefixMessage } from "./prefix.js";
 
-const OWNERS = ["1417552037717086355", "1501051958629503097"];
+const OWNERS = ["1417552037717086355", "1501051958629503097", "1101996899453632534"];
 
 const allCommands = [
   ...funCommands,

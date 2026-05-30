@@ -13,7 +13,7 @@ import {
 import { eq, and, desc } from "drizzle-orm";
 import { generateKey } from "./utils/obfuscate.js";
 
-const OWNERS = ["1417552037717086355", "1501051958629503097"];
+const OWNERS = ["1417552037717086355", "1501051958629503097", "1101996899453632534"];
 const PREFIXES = [".", "!", "?"];
 
 // ── helpers ────────────────────────────────────────────────────────────────

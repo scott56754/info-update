@@ -9,7 +9,7 @@ import { db } from "@workspace/db";
 import { ticketSettings, tickets } from "@workspace/db";
 import { eq, and, isNull } from "drizzle-orm";
 
-const OWNERS = ["1417552037717086355", "1501051958629503097"];
+const OWNERS = ["1417552037717086355", "1501051958629503097", "1101996899453632534"];
 
 function isOwner(id: string) { return OWNERS.includes(id); }
 
