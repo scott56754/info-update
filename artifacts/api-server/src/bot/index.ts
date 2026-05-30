@@ -481,6 +481,16 @@ async function handlePanelRedeem(interaction: any, client: Client, panelName: st
     expiresAt: key.expiresAt,
   });
 
+  // Auto-assign panel role if one is configured
+  if (panel.roleId) {
+    try {
+      const member = await interaction.guild!.members.fetch(interaction.user.id).catch(() => null);
+      if (member && !member.roles.cache.has(panel.roleId)) {
+        await member.roles.add(panel.roleId, `key redeemed for panel: ${panelName}`);
+      }
+    } catch {}
+  }
+
   const expiryNote = key.expiresAt
     ? `\nYour access expires <t:${Math.floor(key.expiresAt.getTime() / 1000)}:R>.`
     : "";

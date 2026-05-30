@@ -199,6 +199,19 @@ export const panelCommands = [
         if (bl) return interaction.reply({ content: `❌ ${target.tag} is blacklisted from **${name}**. Unblacklist them first.`, flags: MessageFlags.Ephemeral });
         const assignedKey = generateKey();
         await db.insert(panelWhitelist).values({ panelId: panel.id, userId: target.id, whitelistedBy: interaction.user.id, expiresAt, keyCode: assignedKey });
+        // Auto-assign panel role if one is configured
+        let roleGranted = false;
+        if (panel.roleId) {
+          try {
+            const member = await interaction.guild!.members.fetch(target.id).catch(() => null);
+            if (member && !member.roles.cache.has(panel.roleId)) {
+              await member.roles.add(panel.roleId, `whitelisted for panel: ${name}`);
+              roleGranted = true;
+            } else if (member?.roles.cache.has(panel.roleId)) {
+              roleGranted = true; // already had it
+            }
+          } catch {}
+        }
         const embed = new EmbedBuilder().setColor(0x57f287).setTitle("✅ User Whitelisted")
           .addFields(
             { name: "User", value: `${target.tag} (${target.id})`, inline: true },
@@ -206,6 +219,7 @@ export const panelCommands = [
             { name: "By", value: interaction.user.tag, inline: true },
             { name: "Key", value: `\`${assignedKey}\``, inline: true },
             { name: "Expires", value: expiresAt ? `<t:${Math.floor(expiresAt.getTime() / 1000)}:R>` : "Never (permanent)", inline: true },
+            ...(panel.roleId ? [{ name: "Role", value: roleGranted ? `✅ <@&${panel.roleId}> assigned` : `⚠️ <@&${panel.roleId}> — could not assign`, inline: true }] : []),
           );
         await interaction.reply({ embeds: [embed] });
         try {
@@ -248,6 +262,13 @@ export const panelCommands = [
                 keyCode: generateKey(),
                 expiresAt,
               });
+              // Auto-assign panel role if configured
+              if (panel.roleId) {
+                try {
+                  const m = interaction.guild!.members.cache.get(memberId);
+                  if (m && !m.roles.cache.has(panel.roleId)) await m.roles.add(panel.roleId, `whitelisted for panel: ${name}`);
+                } catch {}
+              }
               assigned++;
             }
           }
