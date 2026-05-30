@@ -38,7 +38,7 @@ export const utilityCommands = [
         .setDescription(message)
         .setFooter({ text: `Announced by ${interaction.user.tag}` });
       await channel.send({ embeds: [embed] });
-      await interaction.reply({ content: `✅ Announcement sent to ${channel}.`, ephemeral: true });
+      await interaction.reply({ content: `✅ Announcement sent to ${channel}.`, flags: MessageFlags.Ephemeral });
     },
   },
   {
@@ -58,7 +58,7 @@ export const utilityCommands = [
           { name: "Message", value: message },
           { name: "Time", value: `<t:${Math.floor(remindAt.getTime() / 1000)}:R>` }
         );
-      await interaction.reply({ embeds: [embed], ephemeral: true });
+      await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     },
   },
   {
@@ -71,7 +71,7 @@ export const utilityCommands = [
       const target = interaction.options.getUser("user", true);
       const reason = interaction.options.getString("reason", true);
       await db.insert(reports).values({ guildId: interaction.guildId!, reporterId: interaction.user.id, targetId: target.id, reason });
-      await interaction.reply({ content: "✅ Your report has been submitted to the moderators.", ephemeral: true });
+      await interaction.reply({ content: "✅ Your report has been submitted to the moderators.", flags: MessageFlags.Ephemeral });
 
       // Send to report channel
       try {
@@ -147,7 +147,7 @@ export const utilityCommands = [
         .select()
         .from(inviteTracking)
         .where(and(eq(inviteTracking.guildId, interaction.guildId!), eq(inviteTracking.invitedId, target.id)));
-      if (!row) return interaction.reply({ content: "No invite data found for this user.", ephemeral: true });
+      if (!row) return interaction.reply({ content: "No invite data found for this user.", flags: MessageFlags.Ephemeral });
       const inviter = await interaction.client.users.fetch(row.inviterId).catch(() => null);
       const embed = utilEmbed(0x5865f2)
         .setTitle("📨 Invite Info")

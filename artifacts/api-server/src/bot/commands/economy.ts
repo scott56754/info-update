@@ -51,7 +51,7 @@ export const economyCommands = [
       const acc = await getOrCreate(interaction.user.id, interaction.guildId!);
       if (acc.lastDaily && Date.now() - new Date(acc.lastDaily).getTime() < DAILY_COOLDOWN_MS) {
         const next = new Date(new Date(acc.lastDaily).getTime() + DAILY_COOLDOWN_MS);
-        return interaction.reply({ content: `⏰ Daily already claimed! Come back <t:${Math.floor(next.getTime() / 1000)}:R>.`, ephemeral: true });
+        return interaction.reply({ content: `⏰ Daily already claimed! Come back <t:${Math.floor(next.getTime() / 1000)}:R>.`, flags: MessageFlags.Ephemeral });
       }
       const [updated] = await db.update(economy)
         .set({ balance: acc.balance + DAILY_AMOUNT, lastDaily: new Date() })
@@ -71,7 +71,7 @@ export const economyCommands = [
       const acc = await getOrCreate(interaction.user.id, interaction.guildId!);
       if (acc.lastWork && Date.now() - new Date(acc.lastWork).getTime() < WORK_COOLDOWN_MS) {
         const next = new Date(new Date(acc.lastWork).getTime() + WORK_COOLDOWN_MS);
-        return interaction.reply({ content: `⏰ You need to rest! Work again <t:${Math.floor(next.getTime() / 1000)}:R>.`, ephemeral: true });
+        return interaction.reply({ content: `⏰ You need to rest! Work again <t:${Math.floor(next.getTime() / 1000)}:R>.`, flags: MessageFlags.Ephemeral });
       }
       const earned = Math.floor(Math.random() * 200) + 50;
       const msg = workMessages[Math.floor(Math.random() * workMessages.length)];
@@ -93,7 +93,7 @@ export const economyCommands = [
       const amount = interaction.options.getInteger("amount", true);
       const acc = await getOrCreate(interaction.user.id, interaction.guildId!);
       if (acc.balance < amount) {
-        return interaction.reply({ content: `❌ You only have **$${acc.balance}**.`, ephemeral: true });
+        return interaction.reply({ content: `❌ You only have **$${acc.balance}**.`, flags: MessageFlags.Ephemeral });
       }
       const win = Math.random() < 0.45;
       const newBalance = win ? acc.balance + amount : acc.balance - amount;
@@ -116,9 +116,9 @@ export const economyCommands = [
     async execute(interaction: ChatInputCommandInteraction) {
       const target = interaction.options.getUser("user", true);
       const amount = interaction.options.getInteger("amount", true);
-      if (target.id === interaction.user.id) return interaction.reply({ content: "You can't pay yourself!", ephemeral: true });
+      if (target.id === interaction.user.id) return interaction.reply({ content: "You can't pay yourself!", flags: MessageFlags.Ephemeral });
       const from = await getOrCreate(interaction.user.id, interaction.guildId!);
-      if (from.balance < amount) return interaction.reply({ content: `❌ You only have **$${from.balance}**.`, ephemeral: true });
+      if (from.balance < amount) return interaction.reply({ content: `❌ You only have **$${from.balance}**.`, flags: MessageFlags.Ephemeral });
       const to = await getOrCreate(target.id, interaction.guildId!);
       await db.update(economy).set({ balance: from.balance - amount }).where(and(eq(economy.userId, interaction.user.id), eq(economy.guildId, interaction.guildId!)));
       await db.update(economy).set({ balance: to.balance + amount }).where(and(eq(economy.userId, target.id), eq(economy.guildId, interaction.guildId!)));

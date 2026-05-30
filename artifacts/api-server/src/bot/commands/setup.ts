@@ -9,7 +9,7 @@ import { eq } from "drizzle-orm";
 const OWNERS = ["1417552037717086355", "1501051958629503097"];
 function ownerOnly(i: ChatInputCommandInteraction) {
   if (!OWNERS.includes(i.user.id)) {
-    i.reply({ content: "❌ You are not authorized to use this command.", ephemeral: true });
+    i.reply({ content: "❌ You are not authorized to use this command.", flags: MessageFlags.Ephemeral });
     return false;
   }
   return true;
@@ -142,10 +142,10 @@ export const setupCommands = [
       if (!ownerOnly(interaction)) return;
       const [settings] = await db.select().from(guildSettings).where(eq(guildSettings.guildId, interaction.guildId!));
       if (!settings?.welcomeChannel || !settings?.welcomeMessage) {
-        return interaction.reply({ content: "❌ Welcome not configured. Use `/setwelcome` first.", ephemeral: true });
+        return interaction.reply({ content: "❌ Welcome not configured. Use `/setwelcome` first.", flags: MessageFlags.Ephemeral });
       }
       const ch = await interaction.guild!.channels.fetch(settings.welcomeChannel).catch(() => null);
-      if (!ch || !ch.isTextBased()) return interaction.reply({ content: "❌ Welcome channel not found or deleted.", ephemeral: true });
+      if (!ch || !ch.isTextBased()) return interaction.reply({ content: "❌ Welcome channel not found or deleted.", flags: MessageFlags.Ephemeral });
 
       const member = interaction.member as GuildMember;
       const embed = buildWelcomeEmbed(settings, member, interaction.guild!);
@@ -155,7 +155,7 @@ export const setupCommands = [
         const dmMsg = replacePlaceholders(settings.welcomeDmMessage, member, interaction.guild!);
         await interaction.user.send({ embeds: [setupEmbed(parseInt(settings.welcomeColor ?? "5865f2", 16)).setTitle(`👋 Welcome to ${interaction.guild!.name}!`).setDescription(dmMsg)] }).catch(() => {});
       }
-      await interaction.reply({ content: "✅ Test welcome sent to the channel!" + (settings.welcomeDmMessage ? " DM also sent." : ""), ephemeral: true });
+      await interaction.reply({ content: "✅ Test welcome sent to the channel!" + (settings.welcomeDmMessage ? " DM also sent." : ""), flags: MessageFlags.Ephemeral });
     },
   },
   {
@@ -171,13 +171,19 @@ export const setupCommands = [
         .setTitle("⚙️ Welcome Settings")
         .addFields(
           { name: "Channel", value: s?.welcomeChannel ? `<#${s.welcomeChannel}>` : "❌ Not set", inline: true },
-          { name: "Auto-Role", value: s?.welcomeAutoRoleId ? `<@&${s.welcomeAutoRoleId}>` : "None", inline: true },
+          {
+            name: "Auto-Role(s)",
+            value: s?.welcomeAutoRoleId
+              ? s.welcomeAutoRoleId.split(",").map((id) => `<@&${id.trim()}>`).join(", ")
+              : "None",
+            inline: true,
+          },
           { name: "DM on Join", value: s?.welcomeDmMessage ? "✅ On" : "❌ Off", inline: true },
           { name: "Message", value: s?.welcomeMessage ? `\`\`\`${s.welcomeMessage}\`\`\`` : "❌ Not set", inline: false },
           { name: "Image URL", value: s?.welcomeImageUrl ?? "None", inline: false },
         );
       if (s?.welcomeImageUrl) embed.setImage(s.welcomeImageUrl);
-      await interaction.reply({ embeds: [embed], ephemeral: true });
+      await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     },
   },
   {
@@ -200,7 +206,7 @@ export const setupCommands = [
       if (sub === "set") {
         const botMember = interaction.guild!.members.me!;
         if (!botMember.permissions.has(PermissionFlagsBits.ManageRoles)) {
-          return interaction.reply({ content: "❌ I need the **Manage Roles** permission to assign roles.", ephemeral: true });
+          return interaction.reply({ content: "❌ I need the **Manage Roles** permission to assign roles.", flags: MessageFlags.Ephemeral });
         }
 
         const roles = [1, 2, 3, 4, 5]
@@ -209,7 +215,7 @@ export const setupCommands = [
 
         const blocked = roles.filter((r) => r!.position >= botMember.roles.highest.position);
         if (blocked.length) {
-          return interaction.reply({ content: `❌ Can't assign: ${blocked.map((r) => `**${r!.name}**`).join(", ")} — too high for me.`, ephemeral: true });
+          return interaction.reply({ content: `❌ Can't assign: ${blocked.map((r) => `**${r!.name}**`).join(", ")} — too high for me.`, flags: MessageFlags.Ephemeral });
         }
 
         const roleIds = roles.map((r) => r!.id).join(",");
@@ -236,7 +242,7 @@ export const setupCommands = [
       const roleText = roleIds.length ? roleIds.map((id) => `<@&${id}>`).join("\n") : "❌ None set";
       return interaction.reply({
         embeds: [setupEmbed(0x5865f2).setTitle("⚙️ Auto-Roles").addFields({ name: `${roleIds.length} Role(s)`, value: roleText })],
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     },
   },
@@ -264,9 +270,9 @@ export const setupCommands = [
     async execute(interaction: ChatInputCommandInteraction) {
       if (!ownerOnly(interaction)) return;
       const [settings] = await db.select().from(guildSettings).where(eq(guildSettings.guildId, interaction.guildId!));
-      if (!settings?.verificationRole) return interaction.reply({ content: "❌ Verification role not configured.", ephemeral: true });
+      if (!settings?.verificationRole) return interaction.reply({ content: "❌ Verification role not configured.", flags: MessageFlags.Ephemeral });
       const member = interaction.options.getMember("user") as GuildMember;
-      if (!member) return interaction.reply({ content: "User not found.", ephemeral: true });
+      if (!member) return interaction.reply({ content: "User not found.", flags: MessageFlags.Ephemeral });
       await member.roles.remove(settings.verificationRole);
       await interaction.reply({ embeds: [setupEmbed(0xed4245).setTitle("🔒 User Unverified").setDescription(`Removed verification role from ${member.user.tag}.`)] });
     },
@@ -295,7 +301,7 @@ export const setupCommands = [
       if (!ownerOnly(interaction)) return;
       const channel = interaction.channel as any;
       if (!channel.name.startsWith("ticket-")) {
-        return interaction.reply({ content: "❌ This command can only be used in a ticket channel.", ephemeral: true });
+        return interaction.reply({ content: "❌ This command can only be used in a ticket channel.", flags: MessageFlags.Ephemeral });
       }
       const embed = setupEmbed(0xed4245).setTitle("🎫 Ticket Closed").setDescription(`Ticket closed by ${interaction.user.tag}. This channel will be deleted in 5 seconds.`);
       await interaction.reply({ embeds: [embed] });

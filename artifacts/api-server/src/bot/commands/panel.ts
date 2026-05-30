@@ -16,7 +16,7 @@ function isOwner(userId: string) {
 
 function ownerOnly(interaction: ChatInputCommandInteraction) {
   if (!isOwner(interaction.user.id)) {
-    interaction.reply({ content: "❌ You are not authorized to use this command.", ephemeral: true });
+    interaction.reply({ content: "❌ You are not authorized to use this command.", flags: MessageFlags.Ephemeral });
     return false;
   }
   return true;
@@ -85,7 +85,7 @@ export const panelCommands = [
     async execute(interaction: ChatInputCommandInteraction) {
       const name = interaction.options.getString("name", true).toLowerCase();
       const panel = await getPanel(interaction.guildId!, name);
-      if (!panel) return interaction.reply({ content: `❌ No panel named **${name}** found.`, ephemeral: true });
+      if (!panel) return interaction.reply({ content: `❌ No panel named **${name}** found.`, flags: MessageFlags.Ephemeral });
       await interaction.reply({
         embeds: [panelEmbed(panel)],
         components: panelButtons(name),
@@ -103,7 +103,7 @@ export const panelCommands = [
       const name = interaction.options.getString("name", true).toLowerCase().replace(/\s+/g, "-");
       const description = interaction.options.getString("description") ?? `This control panel is for the project: **${name}**\nIf you're a buyer, click on the buttons below to redeem your key, get the script or get your role`;
       const existing = await getPanel(interaction.guildId!, name);
-      if (existing) return interaction.reply({ content: `❌ A panel named **${name}** already exists.`, ephemeral: true });
+      if (existing) return interaction.reply({ content: `❌ A panel named **${name}** already exists.`, flags: MessageFlags.Ephemeral });
       await db.insert(panels).values({ guildId: interaction.guildId!, name, description, createdBy: interaction.user.id });
       const embed = new EmbedBuilder().setColor(0x57f287).setTitle("✅ Panel Created")
         .addFields(
@@ -121,7 +121,7 @@ export const panelCommands = [
       .addAttachmentOption((o) => o.setName("script").setDescription("Upload your .lua script file (max 400KB)").setRequired(true)),
     async execute(interaction: ChatInputCommandInteraction) {
       if (!ownerOnly(interaction)) return;
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const name = interaction.options.getString("panel", true).toLowerCase();
       const panel = await getPanel(interaction.guildId!, name);
       if (!panel) return interaction.editReply({ content: `❌ Panel **${name}** not found.` });
@@ -154,7 +154,7 @@ export const panelCommands = [
       const name = interaction.options.getString("panel", true).toLowerCase();
       const role = interaction.options.getRole("role", true);
       const panel = await getPanel(interaction.guildId!, name);
-      if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, ephemeral: true });
+      if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, flags: MessageFlags.Ephemeral });
       await db.update(panels).set({ roleId: role.id }).where(eq(panels.id, panel.id));
       const embed = new EmbedBuilder().setColor(0x57f287).setTitle("✅ Role Set")
         .addFields({ name: "Panel", value: name, inline: true }, { name: "Role", value: `${role}`, inline: true });
@@ -174,22 +174,22 @@ export const panelCommands = [
       const target = interaction.options.getUser("user", true);
       const durationStr = interaction.options.getString("duration");
       const panel = await getPanel(interaction.guildId!, name);
-      if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, ephemeral: true });
+      if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, flags: MessageFlags.Ephemeral });
 
       let expiresAt: Date | null = null;
       if (durationStr) {
         const ms = parseDuration(durationStr);
-        if (!ms) return interaction.reply({ content: "❌ Invalid duration format. Use e.g. `7d`, `30d`, `24h`.", ephemeral: true });
+        if (!ms) return interaction.reply({ content: "❌ Invalid duration format. Use e.g. `7d`, `30d`, `24h`.", flags: MessageFlags.Ephemeral });
         expiresAt = new Date(Date.now() + ms);
       }
 
       const [existing] = await db.select().from(panelWhitelist)
         .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, target.id)));
-      if (existing) return interaction.reply({ content: `❌ ${target.tag} is already whitelisted for **${name}**.`, ephemeral: true });
+      if (existing) return interaction.reply({ content: `❌ ${target.tag} is already whitelisted for **${name}**.`, flags: MessageFlags.Ephemeral });
 
       const [bl] = await db.select().from(panelBlacklist)
         .where(and(eq(panelBlacklist.panelId, panel.id), eq(panelBlacklist.userId, target.id), eq(panelBlacklist.active, true)));
-      if (bl) return interaction.reply({ content: `❌ ${target.tag} is blacklisted from **${name}**. Unblacklist them first.`, ephemeral: true });
+      if (bl) return interaction.reply({ content: `❌ ${target.tag} is blacklisted from **${name}**. Unblacklist them first.`, flags: MessageFlags.Ephemeral });
 
       await db.insert(panelWhitelist).values({
         panelId: panel.id,
@@ -230,12 +230,12 @@ export const panelCommands = [
       const name = interaction.options.getString("panel", true).toLowerCase();
       const target = interaction.options.getUser("user", true);
       const panel = await getPanel(interaction.guildId!, name);
-      if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, ephemeral: true });
+      if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, flags: MessageFlags.Ephemeral });
 
       const deleted = await db.delete(panelWhitelist)
         .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, target.id)))
         .returning();
-      if (!deleted.length) return interaction.reply({ content: `❌ ${target.tag} is not whitelisted for **${name}**.`, ephemeral: true });
+      if (!deleted.length) return interaction.reply({ content: `❌ ${target.tag} is not whitelisted for **${name}**.`, flags: MessageFlags.Ephemeral });
 
       const embed = new EmbedBuilder().setColor(0xed4245).setTitle("🚫 User Unwhitelisted")
         .addFields({ name: "User", value: target.tag, inline: true }, { name: "Panel", value: name, inline: true });
@@ -255,7 +255,7 @@ export const panelCommands = [
       const target = interaction.options.getUser("user", true);
       const reason = interaction.options.getString("reason") ?? "No reason provided";
       const panel = await getPanel(interaction.guildId!, name);
-      if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, ephemeral: true });
+      if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, flags: MessageFlags.Ephemeral });
 
       await db.delete(panelWhitelist)
         .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, target.id)));
@@ -300,7 +300,7 @@ export const panelCommands = [
       const name = interaction.options.getString("panel", true).toLowerCase();
       const target = interaction.options.getUser("user", true);
       const panel = await getPanel(interaction.guildId!, name);
-      if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, ephemeral: true });
+      if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, flags: MessageFlags.Ephemeral });
 
       await db.update(panelBlacklist).set({ active: false })
         .where(and(eq(panelBlacklist.panelId, panel.id), eq(panelBlacklist.userId, target.id)));
@@ -323,12 +323,12 @@ export const panelCommands = [
       const count = interaction.options.getInteger("count") ?? 1;
       const durationStr = interaction.options.getString("duration");
       const panel = await getPanel(interaction.guildId!, name);
-      if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, ephemeral: true });
+      if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, flags: MessageFlags.Ephemeral });
 
       let expiresAt: Date | null = null;
       if (durationStr) {
         const ms = parseDuration(durationStr);
-        if (!ms) return interaction.reply({ content: "❌ Invalid duration format. Use e.g. `7d`, `30d`, `24h`.", ephemeral: true });
+        if (!ms) return interaction.reply({ content: "❌ Invalid duration format. Use e.g. `7d`, `30d`, `24h`.", flags: MessageFlags.Ephemeral });
         expiresAt = new Date(Date.now() + ms);
       }
 
@@ -355,10 +355,10 @@ export const panelCommands = [
         return interaction.reply({
           content: `✅ Generated ${count} keys for **${name}**.${expiryNote}`,
           files: [file],
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
-      await interaction.reply({ content, ephemeral: true });
+      await interaction.reply({ content, flags: MessageFlags.Ephemeral });
     },
   },
   {
@@ -370,17 +370,17 @@ export const panelCommands = [
       if (!ownerOnly(interaction)) return;
       const name = interaction.options.getString("panel", true).toLowerCase();
       const panel = await getPanel(interaction.guildId!, name);
-      if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, ephemeral: true });
+      if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, flags: MessageFlags.Ephemeral });
 
       const allKeys = await db.select().from(panelKeys).where(eq(panelKeys.panelId, panel.id));
-      if (!allKeys.length) return interaction.reply({ content: `No keys found for **${name}**.`, ephemeral: true });
+      if (!allKeys.length) return interaction.reply({ content: `No keys found for **${name}**.`, flags: MessageFlags.Ephemeral });
 
       const now = new Date();
       // Only show keys that are: active (not revoked), redeemed (usedBy set), and not expired
       const activeKeys = allKeys.filter((k) => k.active && k.usedBy && !(k.expiresAt && k.expiresAt <= now));
 
       if (!activeKeys.length) {
-        return interaction.reply({ content: `No active redeemed keys for **${name}**.`, ephemeral: true });
+        return interaction.reply({ content: `No active redeemed keys for **${name}**.`, flags: MessageFlags.Ephemeral });
       }
 
       const lines = activeKeys.map((k) => {
@@ -397,9 +397,9 @@ export const panelCommands = [
         }).join("\n");
         const buf = Buffer.from(fileContent, "utf8");
         const file = new AttachmentBuilder(buf, { name: `keys-${name}.txt` });
-        return interaction.reply({ content: `**${activeKeys.length}** active keys for **${name}**:`, files: [file], ephemeral: true });
+        return interaction.reply({ content: `**${activeKeys.length}** active keys for **${name}**:`, files: [file], flags: MessageFlags.Ephemeral });
       }
-      await interaction.reply({ content: `**Active keys for \`${name}\` (${activeKeys.length}):**\n${content}`, ephemeral: true });
+      await interaction.reply({ content: `**Active keys for \`${name}\` (${activeKeys.length}):**\n${content}`, flags: MessageFlags.Ephemeral });
     },
   },
   {
@@ -414,13 +414,13 @@ export const panelCommands = [
       const durationStr = interaction.options.getString("duration", true).toLowerCase().trim();
 
       const [key] = await db.select().from(panelKeys).where(eq(panelKeys.keyCode, keyCode));
-      if (!key) return interaction.reply({ content: "❌ Key not found.", ephemeral: true });
-      if (!key.active) return interaction.reply({ content: "❌ That key has been revoked.", ephemeral: true });
+      if (!key) return interaction.reply({ content: "❌ Key not found.", flags: MessageFlags.Ephemeral });
+      if (!key.active) return interaction.reply({ content: "❌ That key has been revoked.", flags: MessageFlags.Ephemeral });
 
       let newExpiresAt: Date | null = null;
       if (durationStr !== "permanent" && durationStr !== "never") {
         const ms = parseDuration(durationStr);
-        if (!ms) return interaction.reply({ content: "❌ Invalid duration. Use e.g. `7d`, `30d`, `24h`, or `permanent`.", ephemeral: true });
+        if (!ms) return interaction.reply({ content: "❌ Invalid duration. Use e.g. `7d`, `30d`, `24h`, or `permanent`.", flags: MessageFlags.Ephemeral });
         newExpiresAt = new Date(Date.now() + ms);
       }
 
@@ -443,7 +443,7 @@ export const panelCommands = [
           { name: "Redeemed By", value: key.usedBy ? `<@${key.usedBy}>` : "Unredeemed", inline: true },
           { name: "New Expiry", value: expiryDisplay },
         );
-      await interaction.reply({ embeds: [embed], ephemeral: true });
+      await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     },
   },
   {
@@ -455,9 +455,9 @@ export const panelCommands = [
       if (!ownerOnly(interaction)) return;
       const keyCode = interaction.options.getString("key", true).toUpperCase();
       const [key] = await db.select().from(panelKeys).where(eq(panelKeys.keyCode, keyCode));
-      if (!key) return interaction.reply({ content: "❌ Key not found.", ephemeral: true });
+      if (!key) return interaction.reply({ content: "❌ Key not found.", flags: MessageFlags.Ephemeral });
       await db.update(panelKeys).set({ active: false }).where(eq(panelKeys.keyCode, keyCode));
-      await interaction.reply({ content: `✅ Key \`${keyCode}\` has been revoked.`, ephemeral: true });
+      await interaction.reply({ content: `✅ Key \`${keyCode}\` has been revoked.`, flags: MessageFlags.Ephemeral });
     },
   },
   {
@@ -469,10 +469,10 @@ export const panelCommands = [
       if (!ownerOnly(interaction)) return;
       const name = interaction.options.getString("panel", true).toLowerCase();
       const panel = await getPanel(interaction.guildId!, name);
-      if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, ephemeral: true });
+      if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, flags: MessageFlags.Ephemeral });
 
       const list = await db.select().from(panelWhitelist).where(eq(panelWhitelist.panelId, panel.id));
-      if (!list.length) return interaction.reply({ content: `No users whitelisted for **${name}**.`, ephemeral: true });
+      if (!list.length) return interaction.reply({ content: `No users whitelisted for **${name}**.`, flags: MessageFlags.Ephemeral });
 
       const now = new Date();
       const embed = new EmbedBuilder().setColor(0x5865f2)
@@ -485,7 +485,7 @@ export const panelCommands = [
           return `**${i + 1}.** <@${e.userId}>${expiry}`;
         }).join("\n"))
         .setFooter({ text: `${list.length} user(s) whitelisted` });
-      await interaction.reply({ embeds: [embed], ephemeral: true });
+      await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     },
   },
   {
@@ -500,10 +500,10 @@ export const panelCommands = [
       const panelName = interaction.options.getString("panel")?.toLowerCase().trim();
 
       if (!keyCode && !panelName) {
-        return interaction.reply({ content: "❌ Provide either a `key` or a `panel` name.", ephemeral: true });
+        return interaction.reply({ content: "❌ Provide either a `key` or a `panel` name.", flags: MessageFlags.Ephemeral });
       }
 
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const now = new Date();
 
       // ── Single key lookup ──────────────────────────────────────────────
@@ -585,17 +585,17 @@ export const panelCommands = [
 
       const guild = interaction.guild!;
       const member = await guild.members.fetch(target.id).catch(() => null);
-      if (!member) return interaction.reply({ content: "❌ That user is not in this server.", ephemeral: true });
+      if (!member) return interaction.reply({ content: "❌ That user is not in this server.", flags: MessageFlags.Ephemeral });
 
       const botMember = guild.members.me!;
       if (!botMember.permissions.has(PermissionFlagsBits.ManageRoles)) {
-        return interaction.reply({ content: "❌ I don't have the **Manage Roles** permission.", ephemeral: true });
+        return interaction.reply({ content: "❌ I don't have the **Manage Roles** permission.", flags: MessageFlags.Ephemeral });
       }
       if (role.position >= botMember.roles.highest.position) {
-        return interaction.reply({ content: `❌ I can't assign **${role.name}** — it's higher than or equal to my highest role.`, ephemeral: true });
+        return interaction.reply({ content: `❌ I can't assign **${role.name}** — it's higher than or equal to my highest role.`, flags: MessageFlags.Ephemeral });
       }
       if (member.roles.cache.has(role.id)) {
-        return interaction.reply({ content: `⚠️ ${target} already has the **${role.name}** role.`, ephemeral: true });
+        return interaction.reply({ content: `⚠️ ${target} already has the **${role.name}** role.`, flags: MessageFlags.Ephemeral });
       }
 
       await member.roles.add(role.id, reason);
@@ -611,7 +611,7 @@ export const panelCommands = [
         )
         .setTimestamp();
 
-      await interaction.reply({ embeds: [embed], ephemeral: true });
+      await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     },
   },
   {
@@ -629,17 +629,17 @@ export const panelCommands = [
 
       const guild = interaction.guild!;
       const member = await guild.members.fetch(target.id).catch(() => null);
-      if (!member) return interaction.reply({ content: "❌ That user is not in this server.", ephemeral: true });
+      if (!member) return interaction.reply({ content: "❌ That user is not in this server.", flags: MessageFlags.Ephemeral });
 
       const botMember = guild.members.me!;
       if (!botMember.permissions.has(PermissionFlagsBits.ManageRoles)) {
-        return interaction.reply({ content: "❌ I don't have the **Manage Roles** permission.", ephemeral: true });
+        return interaction.reply({ content: "❌ I don't have the **Manage Roles** permission.", flags: MessageFlags.Ephemeral });
       }
       if (role.position >= botMember.roles.highest.position) {
-        return interaction.reply({ content: `❌ I can't remove **${role.name}** — it's higher than or equal to my highest role.`, ephemeral: true });
+        return interaction.reply({ content: `❌ I can't remove **${role.name}** — it's higher than or equal to my highest role.`, flags: MessageFlags.Ephemeral });
       }
       if (!member.roles.cache.has(role.id)) {
-        return interaction.reply({ content: `⚠️ ${target} doesn't have the **${role.name}** role.`, ephemeral: true });
+        return interaction.reply({ content: `⚠️ ${target} doesn't have the **${role.name}** role.`, flags: MessageFlags.Ephemeral });
       }
 
       await member.roles.remove(role.id, reason);
@@ -655,7 +655,7 @@ export const panelCommands = [
         )
         .setTimestamp();
 
-      await interaction.reply({ embeds: [embed], ephemeral: true });
+      await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     },
   },
   {
@@ -672,9 +672,9 @@ export const panelCommands = [
       const rawId = interaction.options.getString("userid");
 
       const userId = targetUser?.id ?? rawId?.trim();
-      if (!userId) return interaction.reply({ content: "❌ Provide either a `user` or a `userid`.", ephemeral: true });
+      if (!userId) return interaction.reply({ content: "❌ Provide either a `user` or a `userid`.", flags: MessageFlags.Ephemeral });
 
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
       const panel = await getPanel(interaction.guildId!, panelName);
       if (!panel) return interaction.editReply({ content: `❌ Panel **${panelName}** not found.` });
@@ -717,10 +717,10 @@ export const panelCommands = [
     async execute(interaction: ChatInputCommandInteraction) {
       if (!ownerOnly(interaction)) return;
       const allPanels = await db.select().from(panels).where(eq(panels.guildId, interaction.guildId!));
-      if (!allPanels.length) return interaction.reply({ content: "No panels created yet. Use `/createpanel` to get started.", ephemeral: true });
+      if (!allPanels.length) return interaction.reply({ content: "No panels created yet. Use `/createpanel` to get started.", flags: MessageFlags.Ephemeral });
       const embed = new EmbedBuilder().setColor(0x5865f2).setTitle("📋 Panels")
         .setDescription(allPanels.map((p, i) => `**${i + 1}.** \`${p.name}\` ${p.scriptContent ? "✅ Script set" : "⚠️ No script"} ${p.roleId ? `| Role: <@&${p.roleId}>` : ""}`).join("\n"));
-      await interaction.reply({ embeds: [embed], ephemeral: true });
+      await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     },
   },
 ];

@@ -53,7 +53,7 @@ export const funCommands = [
       const raw = interaction.options.getString("options", true);
       const options = raw.split(",").map((s) => s.trim()).filter(Boolean);
       if (options.length < 2) {
-        return interaction.reply({ content: "Please provide at least 2 options separated by commas.", ephemeral: true });
+        return interaction.reply({ content: "Please provide at least 2 options separated by commas.", flags: MessageFlags.Ephemeral });
       }
       const chosen = options[Math.floor(Math.random() * options.length)];
       const embed = makeEmbed(0x57f287)
@@ -110,7 +110,7 @@ export const funCommands = [
       const raw = interaction.options.getString("options", true);
       const options = raw.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 5);
       if (options.length < 2) {
-        return interaction.reply({ content: "Please provide at least 2 options.", ephemeral: true });
+        return interaction.reply({ content: "Please provide at least 2 options.", flags: MessageFlags.Ephemeral });
       }
       const emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"];
       const description = options.map((o, i) => `${emojis[i]} ${o}`).join("\n");

@@ -8,7 +8,7 @@ const unavailable = async (interaction: ChatInputCommandInteraction) => {
   const embed = musicEmbed(0xfee75c)
     .setTitle("🎵 Music")
     .setDescription("Music commands require a voice connection. Join a voice channel and try again.\n\n*Full music support with YouTube playback is available when the bot is in your voice channel.*");
-  await interaction.reply({ embeds: [embed], ephemeral: true });
+  await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 };
 
 export const musicCommands = [
@@ -20,7 +20,7 @@ export const musicCommands = [
     async execute(interaction: ChatInputCommandInteraction) {
       const member = interaction.guild?.members.cache.get(interaction.user.id);
       const vc = member?.voice.channel;
-      if (!vc) return interaction.reply({ content: "🔊 You need to be in a voice channel first!", ephemeral: true });
+      if (!vc) return interaction.reply({ content: "🔊 You need to be in a voice channel first!", flags: MessageFlags.Ephemeral });
       const query = interaction.options.getString("query", true);
       const embed = musicEmbed(0x5865f2)
         .setTitle("🎵 Added to Queue")

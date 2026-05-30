@@ -9,7 +9,7 @@ import { eq, and } from "drizzle-orm";
 const OWNERS = ["1417552037717086355", "1501051958629503097"];
 function ownerOnly(i: ChatInputCommandInteraction) {
   if (!OWNERS.includes(i.user.id)) {
-    i.reply({ content: "❌ You are not authorized to use this command.", ephemeral: true });
+    i.reply({ content: "❌ You are not authorized to use this command.", flags: MessageFlags.Ephemeral });
     return false;
   }
   return true;
@@ -43,8 +43,8 @@ export const moderationCommands = [
       const target = interaction.options.getMember("user") as GuildMember;
       const reason = interaction.options.getString("reason") ?? "No reason provided";
       const days = interaction.options.getInteger("days") ?? 0;
-      if (!target) return interaction.reply({ content: "User not found.", ephemeral: true });
-      if (!target.bannable) return interaction.reply({ content: "I cannot ban this user.", ephemeral: true });
+      if (!target) return interaction.reply({ content: "User not found.", flags: MessageFlags.Ephemeral });
+      if (!target.bannable) return interaction.reply({ content: "I cannot ban this user.", flags: MessageFlags.Ephemeral });
       await target.ban({ reason, deleteMessageSeconds: days * 86400 });
       const embed = modEmbed(0xed4245, "🔨 Member Banned")
         .addFields(
@@ -67,8 +67,8 @@ export const moderationCommands = [
       if (!ownerOnly(interaction)) return;
       const target = interaction.options.getMember("user") as GuildMember;
       const reason = interaction.options.getString("reason") ?? "No reason provided";
-      if (!target) return interaction.reply({ content: "User not found.", ephemeral: true });
-      if (!target.kickable) return interaction.reply({ content: "I cannot kick this user.", ephemeral: true });
+      if (!target) return interaction.reply({ content: "User not found.", flags: MessageFlags.Ephemeral });
+      if (!target.kickable) return interaction.reply({ content: "I cannot kick this user.", flags: MessageFlags.Ephemeral });
       await target.kick(reason);
       const embed = modEmbed(0xffa500, "👢 Member Kicked")
         .addFields(
@@ -93,7 +93,7 @@ export const moderationCommands = [
       const target = interaction.options.getMember("user") as GuildMember;
       const duration = interaction.options.getInteger("duration", true);
       const reason = interaction.options.getString("reason") ?? "No reason provided";
-      if (!target) return interaction.reply({ content: "User not found.", ephemeral: true });
+      if (!target) return interaction.reply({ content: "User not found.", flags: MessageFlags.Ephemeral });
       await target.timeout(duration * 60 * 1000, reason);
       await db.insert(mutes).values({ userId: target.id, guildId: interaction.guildId!, moderatorId: interaction.user.id, reason, expiresAt: new Date(Date.now() + duration * 60 * 1000) });
       const embed = modEmbed(0xffa500, "🔇 Member Muted")
@@ -115,7 +115,7 @@ export const moderationCommands = [
     async execute(interaction: ChatInputCommandInteraction) {
       if (!ownerOnly(interaction)) return;
       const target = interaction.options.getMember("user") as GuildMember;
-      if (!target) return interaction.reply({ content: "User not found.", ephemeral: true });
+      if (!target) return interaction.reply({ content: "User not found.", flags: MessageFlags.Ephemeral });
       await target.timeout(null);
       const embed = modEmbed(0x57f287, "🔊 Member Unmuted")
         .addFields({ name: "User", value: target.user.tag, inline: true }, { name: "Moderator", value: interaction.user.tag, inline: true });
@@ -173,7 +173,7 @@ export const moderationCommands = [
       if (!ownerOnly(interaction)) return;
       const amount = interaction.options.getInteger("amount", true);
       const channel = interaction.channel as any;
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const deleted = await channel.bulkDelete(amount, true);
       await interaction.editReply({ content: `✅ Deleted **${deleted.size}** messages.` });
     },
@@ -187,7 +187,7 @@ export const moderationCommands = [
     async execute(interaction: ChatInputCommandInteraction) {
       if (!ownerOnly(interaction)) return;
       const amount = interaction.options.getInteger("amount", true);
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const messages = await (interaction.channel as any).messages.fetch({ limit: amount });
       const botMsgs = messages.filter((m: any) => m.author.bot);
       await (interaction.channel as any).bulkDelete(botMsgs, true);
@@ -205,7 +205,7 @@ export const moderationCommands = [
       if (!ownerOnly(interaction)) return;
       const target = interaction.options.getUser("user", true);
       const amount = interaction.options.getInteger("amount", true);
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const messages = await (interaction.channel as any).messages.fetch({ limit: amount });
       const userMsgs = messages.filter((m: any) => m.author.id === target.id);
       await (interaction.channel as any).bulkDelete(userMsgs, true);
@@ -221,7 +221,7 @@ export const moderationCommands = [
     async execute(interaction: ChatInputCommandInteraction) {
       if (!ownerOnly(interaction)) return;
       const amount = interaction.options.getInteger("amount") ?? 100;
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const deleted = await (interaction.channel as any).bulkDelete(amount, true);
       await interaction.editReply({ content: `✅ Cleared **${deleted.size}** messages.` });
     },

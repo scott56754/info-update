@@ -9,7 +9,7 @@ import { eq } from "drizzle-orm";
 const OWNERS = ["1417552037717086355", "1501051958629503097"];
 function ownerOnly(i: ChatInputCommandInteraction) {
   if (!OWNERS.includes(i.user.id)) {
-    i.reply({ content: "❌ You are not authorized to use this command.", ephemeral: true });
+    i.reply({ content: "❌ You are not authorized to use this command.", flags: MessageFlags.Ephemeral });
     return false;
   }
   return true;
@@ -255,20 +255,20 @@ export const antiNukeCommands = [
       if (sub === "enable") {
         await db.insert(antiNukeSettings).values({ guildId: interaction.guildId!, enabled: true, punishment: "ban" })
           .onConflictDoUpdate({ target: antiNukeSettings.guildId, set: { enabled: true, updatedAt: new Date() } });
-        await interaction.reply({ content: "✅ Anti-nuke protection **enabled**.", ephemeral: true });
+        await interaction.reply({ content: "✅ Anti-nuke protection **enabled**.", flags: MessageFlags.Ephemeral });
         return;
       }
 
       if (sub === "disable") {
         await db.insert(antiNukeSettings).values({ guildId: interaction.guildId!, enabled: false, punishment: "ban" })
           .onConflictDoUpdate({ target: antiNukeSettings.guildId, set: { enabled: false, updatedAt: new Date() } });
-        await interaction.reply({ content: "🔴 Anti-nuke protection **disabled**.", ephemeral: true });
+        await interaction.reply({ content: "🔴 Anti-nuke protection **disabled**.", flags: MessageFlags.Ephemeral });
         return;
       }
 
       if (sub === "status") {
         const [settings] = await db.select().from(antiNukeSettings).where(eq(antiNukeSettings.guildId, interaction.guildId!));
-        if (!settings) return interaction.reply({ content: "⚠️ Anti-nuke not configured. Use `/antinuke setup` first.", ephemeral: true });
+        if (!settings) return interaction.reply({ content: "⚠️ Anti-nuke not configured. Use `/antinuke setup` first.", flags: MessageFlags.Ephemeral });
         const punishLabels: Record<string, string> = { ban: "Ban", kick: "Kick", strip_roles: "Strip Roles", timeout: "Timeout 24h" };
         const embed = new EmbedBuilder()
           .setColor(settings.enabled ? 0x57f287 : 0xed4245)
@@ -282,7 +282,7 @@ export const antiNukeCommands = [
             { name: "Bot Add Threshold", value: `${settings.botAddThreshold}`, inline: true },
             { name: "Log Channel", value: settings.logChannelId ? `<#${settings.logChannelId}>` : "None", inline: true },
           );
-        await interaction.reply({ embeds: [embed], ephemeral: true });
+        await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
       }
     },
   },

@@ -6,7 +6,7 @@ import {
 } from "discord.js";
 import { db } from "@workspace/db";
 import { ticketSettings, tickets } from "@workspace/db";
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 
 const OWNERS = ["1417552037717086355", "1501051958629503097"];
 
@@ -14,7 +14,7 @@ function isOwner(id: string) { return OWNERS.includes(id); }
 
 function ownerOnly(i: ChatInputCommandInteraction) {
   if (!isOwner(i.user.id)) {
-    i.reply({ content: "❌ You are not authorized to use this command.", ephemeral: true });
+    i.reply({ content: "❌ You are not authorized to use this command.", flags: MessageFlags.Ephemeral });
     return false;
   }
   return true;
@@ -159,7 +159,7 @@ async function handleCloseTicket(interaction: ChatInputCommandInteraction | Butt
   const channelId = interaction.channelId;
   const [ticket] = await db.select().from(tickets).where(eq(tickets.channelId, channelId));
   if (!ticket) {
-    return interaction.reply({ content: "❌ This is not a ticket channel.", ephemeral: true });
+    return interaction.reply({ content: "❌ This is not a ticket channel.", flags: MessageFlags.Ephemeral });
   }
 
   const isStaff = isOwner(interaction.user.id) ||
@@ -167,7 +167,7 @@ async function handleCloseTicket(interaction: ChatInputCommandInteraction | Butt
   const isTicketOwner = ticket.userId === interaction.user.id;
 
   if (!isStaff && !isTicketOwner) {
-    return interaction.reply({ content: "❌ Only the ticket creator or staff can close this ticket.", ephemeral: true });
+    return interaction.reply({ content: "❌ Only the ticket creator or staff can close this ticket.", flags: MessageFlags.Ephemeral });
   }
 
   await interaction.reply({ content: "🔒 Closing ticket in 5 seconds..." });
@@ -182,7 +182,11 @@ async function handleCloseTicket(interaction: ChatInputCommandInteraction | Butt
 }
 
 export async function handleTicketButton(interaction: ButtonInteraction, client: Client, type: string) {
-  await interaction.deferReply({ ephemeral: true });
+  try {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  } catch {
+    return; // Stale or already-acknowledged interaction — silently ignore
+  }
 
   const guildId = interaction.guildId!;
   const userId = interaction.user.id;
@@ -192,7 +196,7 @@ export async function handleTicketButton(interaction: ButtonInteraction, client:
 
   // Check for existing open ticket by this user of this type
   const [existing] = await db.select().from(tickets)
-    .where(and(eq(tickets.guildId, guildId), eq(tickets.userId, userId), eq(tickets.ticketType, type)));
+    .where(and(eq(tickets.guildId, guildId), eq(tickets.userId, userId), eq(tickets.ticketType, type), isNull(tickets.closedAt)));
 
   if (existing) {
     // Check channel still exists

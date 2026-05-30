@@ -119,7 +119,7 @@ export const infoCommands = [
       const all = await db.select().from(economy).where(eq(economy.guildId, interaction.guildId!)).orderBy(desc(economy.balance));
       const rank = all.findIndex((e) => e.userId === target.id) + 1;
       const entry = all.find((e) => e.userId === target.id);
-      if (!entry) return interaction.reply({ content: "This user has no economy data yet.", ephemeral: true });
+      if (!entry) return interaction.reply({ content: "This user has no economy data yet.", flags: MessageFlags.Ephemeral });
       const embed = infoEmbed(0xf1c40f)
         .setTitle(`🏅 Rank — ${target.tag}`)
         .addFields(

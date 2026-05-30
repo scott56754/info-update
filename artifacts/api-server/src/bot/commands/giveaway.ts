@@ -9,7 +9,7 @@ import { eq, and } from "drizzle-orm";
 const OWNERS = ["1417552037717086355", "1501051958629503097"];
 function ownerOnly(i: ChatInputCommandInteraction) {
   if (!OWNERS.includes(i.user.id)) {
-    i.reply({ content: "❌ You are not authorized to use this command.", ephemeral: true });
+    i.reply({ content: "❌ You are not authorized to use this command.", flags: MessageFlags.Ephemeral });
     return false;
   }
   return true;
@@ -78,7 +78,7 @@ export async function endGiveaway(client: Client, giveaway: typeof giveaways.$in
 }
 
 export async function handleGiveawayButton(interaction: any, client: Client, giveawayId: number) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const [giveaway] = await db.select().from(giveaways).where(eq(giveaways.id, giveawayId));
   if (!giveaway) return interaction.editReply({ content: "❌ Giveaway not found." });
@@ -162,11 +162,11 @@ export const giveawayCommands = [
         const winnersCount = interaction.options.getInteger("winners") ?? 1;
 
         const ms = parseDuration(durationStr);
-        if (!ms || ms < 5000) return interaction.reply({ content: "❌ Invalid duration. Use format like `10m`, `1h`, `1d`.", ephemeral: true });
+        if (!ms || ms < 5000) return interaction.reply({ content: "❌ Invalid duration. Use format like `10m`, `1h`, `1d`.", flags: MessageFlags.Ephemeral });
 
         const endsAt = new Date(Date.now() + ms);
 
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
         const [inserted] = await db.insert(giveaways).values({
           guildId: interaction.guildId!,
@@ -190,10 +190,10 @@ export const giveawayCommands = [
       if (sub === "end") {
         const id = interaction.options.getInteger("id", true);
         const [giveaway] = await db.select().from(giveaways).where(eq(giveaways.id, id));
-        if (!giveaway || giveaway.guildId !== interaction.guildId) return interaction.reply({ content: "❌ Giveaway not found.", ephemeral: true });
-        if (giveaway.ended) return interaction.reply({ content: "❌ Giveaway already ended.", ephemeral: true });
+        if (!giveaway || giveaway.guildId !== interaction.guildId) return interaction.reply({ content: "❌ Giveaway not found.", flags: MessageFlags.Ephemeral });
+        if (giveaway.ended) return interaction.reply({ content: "❌ Giveaway already ended.", flags: MessageFlags.Ephemeral });
 
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         await endGiveaway(client, giveaway);
         await interaction.editReply({ content: `✅ Giveaway **#${id}** (${giveaway.prize}) has been ended.` });
         return;
@@ -203,10 +203,10 @@ export const giveawayCommands = [
         const id = interaction.options.getInteger("id", true);
         const winnersCount = interaction.options.getInteger("winners") ?? 1;
         const [giveaway] = await db.select().from(giveaways).where(eq(giveaways.id, id));
-        if (!giveaway || giveaway.guildId !== interaction.guildId) return interaction.reply({ content: "❌ Giveaway not found.", ephemeral: true });
-        if (!giveaway.ended) return interaction.reply({ content: "❌ Giveaway has not ended yet.", ephemeral: true });
+        if (!giveaway || giveaway.guildId !== interaction.guildId) return interaction.reply({ content: "❌ Giveaway not found.", flags: MessageFlags.Ephemeral });
+        if (!giveaway.ended) return interaction.reply({ content: "❌ Giveaway has not ended yet.", flags: MessageFlags.Ephemeral });
 
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         const entries = await db.select().from(giveawayEntries).where(eq(giveawayEntries.giveawayId, id));
         const shuffled = entries.sort(() => Math.random() - 0.5);
         const winners = shuffled.slice(0, winnersCount);
@@ -236,10 +236,10 @@ export const giveawayCommands = [
       if (sub === "list") {
         const active = await db.select().from(giveaways)
           .where(and(eq(giveaways.guildId, interaction.guildId!), eq(giveaways.ended, false)));
-        if (!active.length) return interaction.reply({ content: "No active giveaways.", ephemeral: true });
+        if (!active.length) return interaction.reply({ content: "No active giveaways.", flags: MessageFlags.Ephemeral });
         const embed = new EmbedBuilder().setColor(0xfee75c).setTitle("🎉 Active Giveaways")
           .setDescription(active.map((g) => `**ID ${g.id}** — ${g.prize} | <#${g.channelId}> | Ends <t:${Math.floor(g.endsAt.getTime() / 1000)}:R>`).join("\n"));
-        await interaction.reply({ embeds: [embed], ephemeral: true });
+        await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
       }
     },
   },
