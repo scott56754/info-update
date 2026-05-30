@@ -771,4 +771,75 @@ export const panelCommands = [
       await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     },
   },
+  {
+    data: new SlashCommandBuilder()
+      .setName("deletepanel")
+      .setDescription("Permanently delete a panel and all its keys, whitelist, and blacklist data")
+      .addStringOption((o) => o.setName("name").setDescription("Panel name").setRequired(true)),
+    async execute(interaction: ChatInputCommandInteraction) {
+      if (!ownerOnly(interaction)) return;
+      const name = interaction.options.getString("name", true).toLowerCase();
+      const panel = await getPanel(interaction.guildId!, name);
+      if (!panel) return interaction.reply({ content: `❌ No panel named **${name}** found.`, flags: MessageFlags.Ephemeral });
+      await db.delete(panels).where(eq(panels.id, panel.id));
+      const embed = new EmbedBuilder().setColor(0xed4245).setTitle("🗑️ Panel Deleted")
+        .setDescription(`Panel **${name}** and all its associated keys, whitelist, and blacklist data have been permanently deleted.`)
+        .setTimestamp();
+      await interaction.reply({ embeds: [embed] });
+    },
+  },
+  {
+    data: new SlashCommandBuilder()
+      .setName("listaccess")
+      .setDescription("Show all whitelisted/blacklisted users and roles for a panel")
+      .addStringOption((o) => o.setName("panel").setDescription("Panel name").setRequired(true)),
+    async execute(interaction: ChatInputCommandInteraction) {
+      if (!ownerOnly(interaction)) return;
+      const name = interaction.options.getString("panel", true).toLowerCase();
+      const panel = await getPanel(interaction.guildId!, name);
+      if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, flags: MessageFlags.Ephemeral });
+
+      const [wlUsers, wlRoles, blUsers, blRoles] = await Promise.all([
+        db.select().from(panelWhitelist).where(eq(panelWhitelist.panelId, panel.id)),
+        db.select().from(panelRoleWhitelist).where(eq(panelRoleWhitelist.panelId, panel.id)),
+        db.select().from(panelBlacklist).where(and(eq(panelBlacklist.panelId, panel.id), eq(panelBlacklist.active, true))),
+        db.select().from(panelRoleBlacklist).where(and(eq(panelRoleBlacklist.panelId, panel.id), eq(panelRoleBlacklist.active, true))),
+      ]);
+
+      const now = new Date();
+
+      const fmtExpiry = (expiresAt: Date | null | undefined) =>
+        expiresAt ? (expiresAt <= now ? " ⏰ **Expired**" : ` ⏰ ${formatTimeLeft(expiresAt)} left`) : " ⏰ Permanent";
+
+      const wlUserLines = wlUsers.length
+        ? wlUsers.map((e) => `<@${e.userId}>${fmtExpiry(e.expiresAt)}`).join("\n")
+        : "_None_";
+
+      const wlRoleLines = wlRoles.length
+        ? wlRoles.map((e) => `<@&${e.roleId}>${fmtExpiry(e.expiresAt)}`).join("\n")
+        : "_None_";
+
+      const blUserLines = blUsers.length
+        ? blUsers.map((e) => `<@${e.userId}> — ${e.reason}`).join("\n")
+        : "_None_";
+
+      const blRoleLines = blRoles.length
+        ? blRoles.map((e) => `<@&${e.roleId}> — ${e.reason}`).join("\n")
+        : "_None_";
+
+      const embed = new EmbedBuilder()
+        .setColor(0x5865f2)
+        .setTitle(`🔐 Access List — ${name}`)
+        .addFields(
+          { name: `✅ Whitelisted Users (${wlUsers.length})`, value: wlUserLines, inline: false },
+          { name: `✅ Whitelisted Roles (${wlRoles.length})`, value: wlRoleLines, inline: false },
+          { name: `🔨 Blacklisted Users (${blUsers.length})`, value: blUserLines, inline: false },
+          { name: `🔨 Blacklisted Roles (${blRoles.length})`, value: blRoleLines, inline: false },
+        )
+        .setFooter({ text: `Total: ${wlUsers.length + wlRoles.length} whitelisted · ${blUsers.length + blRoles.length} blacklisted` })
+        .setTimestamp();
+
+      await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+    },
+  },
 ];
