@@ -1157,4 +1157,60 @@ export const panelCommands = [
       });
     },
   },
+  {
+    data: new SlashCommandBuilder()
+      .setName("checkpanel")
+      .setDescription("Show full status of a panel — script, keys, whitelist, and loader URL")
+      .addStringOption((o) => o.setName("panel").setDescription("Panel name").setRequired(true)),
+    async execute(interaction: ChatInputCommandInteraction) {
+      if (!ownerOnly(interaction)) return;
+      const name = interaction.options.getString("panel", true).toLowerCase();
+
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+      const panel = await getPanel(interaction.guildId!, name);
+      if (!panel) return interaction.editReply({ content: `❌ Panel **${name}** not found.` });
+
+      const now = new Date();
+
+      const allKeys = await db.select().from(panelKeys).where(eq(panelKeys.panelId, panel.id));
+      const totalKeys = allKeys.length;
+      const activeUnredeemed = allKeys.filter((k) => k.active && !k.usedBy && !(k.expiresAt && k.expiresAt <= now)).length;
+      const activeRedeemed = allKeys.filter((k) => k.active && k.usedBy && !(k.expiresAt && k.expiresAt <= now)).length;
+      const expiredOrRevoked = allKeys.filter((k) => !k.active || (k.expiresAt && k.expiresAt <= now)).length;
+
+      const wlUsers = await db.select().from(panelWhitelist).where(eq(panelWhitelist.panelId, panel.id));
+      const activeWl = wlUsers.filter((w) => !(w.expiresAt && w.expiresAt <= now)).length;
+      const expiredWl = wlUsers.filter((w) => w.expiresAt && w.expiresAt <= now).length;
+
+      const domain = process.env.REPLIT_DEV_DOMAIN
+        ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+        : `http://localhost:${process.env.PORT ?? 8080}`;
+      const loaderUrl = `${domain}/api/loader/${encodeURIComponent(name)}/<key>`;
+
+      const scriptStatus = panel.scriptContent
+        ? `✅ Loaded (${panel.scriptContent.split("\n").length} lines)`
+        : "❌ Not set — use `/setscriptsource`";
+
+      const roleStatus = panel.roleId ? `<@&${panel.roleId}>` : "❌ None — use `/setrole`";
+
+      const embed = new EmbedBuilder()
+        .setColor(panel.scriptContent ? 0x57f287 : 0xfee75c)
+        .setTitle(`📋 Panel Status — ${name}`)
+        .addFields(
+          { name: "🧾 Script", value: scriptStatus, inline: false },
+          { name: "👤 Role", value: roleStatus, inline: true },
+          { name: "🔑 Keys (total)", value: `${totalKeys}`, inline: true },
+          { name: "🟢 Unredeemed", value: `${activeUnredeemed}`, inline: true },
+          { name: "✅ Redeemed & Active", value: `${activeRedeemed}`, inline: true },
+          { name: "🔴 Expired/Revoked", value: `${expiredOrRevoked}`, inline: true },
+          { name: "👥 Whitelisted Users", value: `${activeWl} active${expiredWl > 0 ? `, ${expiredWl} expired` : ""}`, inline: true },
+          { name: "🔗 Loader URL", value: `\`${loaderUrl}\``, inline: false },
+        )
+        .setFooter({ text: `Panel ID: ${panel.id} · Created by ${panel.createdBy}` })
+        .setTimestamp();
+
+      await interaction.editReply({ embeds: [embed] });
+    },
+  },
 ];
