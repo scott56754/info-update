@@ -131,7 +131,7 @@ async function setupAndLogin(
         logger.info({ count: commandData.length }, "Registered guild slash commands");
         await rest.put(Routes.applicationCommands(clientId), { body: [] }).catch(() => {});
       } catch (guildErr: any) {
-        logger.warn({ code: guildErr?.code }, "Guild command registration failed — falling back to global");
+        logger.warn({ code: guildErr?.code, message: guildErr?.message, rawError: JSON.stringify(guildErr?.rawError ?? guildErr?.body ?? null) }, "Guild command registration failed — falling back to global");
         await rest.put(Routes.applicationCommands(clientId), { body: commandData });
         logger.info({ count: commandData.length }, "Registered global slash commands (fallback)");
         await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: [] }).catch(() => {});
