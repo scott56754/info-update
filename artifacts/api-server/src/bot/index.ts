@@ -144,10 +144,40 @@ async function setupAndLogin(
     logger.error({ err }, "Failed to register slash commands");
   }
 
-  // Prevent unhandled Discord API errors (expired interactions, unknown interactions, etc.) from crashing the process
+  // Prevent unhandled Discord API errors from crashing the process
   client.on(Events.Error, (err) => {
     logger.error({ err }, "Discord client error (handled)");
   });
+
+  // Log disconnect / reconnect events
+  client.on(Events.ShardDisconnect, (event, shardId) => {
+    logger.warn({ code: event.code, shardId }, "Discord shard disconnected — will auto-reconnect");
+  });
+  client.on(Events.ShardReconnecting, (shardId) => {
+    logger.info({ shardId }, "Discord shard reconnecting…");
+  });
+  client.on(Events.ShardResume, (shardId, replayedEvents) => {
+    logger.info({ shardId, replayedEvents }, "Discord shard resumed ✅");
+  });
+
+  // Watchdog: if the client is no longer ready after a quiet period, force a fresh login
+  let watchdogMissed = 0;
+  const watchdog = setInterval(async () => {
+    if (client.isReady()) {
+      watchdogMissed = 0;
+      return;
+    }
+    watchdogMissed++;
+    logger.warn({ watchdogMissed }, "Bot watchdog: client not ready");
+    if (watchdogMissed >= 3) {
+      watchdogMissed = 0;
+      logger.warn("Bot watchdog: forcing reconnect after 3 missed heartbeats");
+      clearInterval(watchdog);
+      try { client.destroy(); } catch {}
+      // Re-enter startBot to get a fresh client with correct intents
+      startBot().catch((err) => logger.error({ err }, "Bot watchdog restart failed"));
+    }
+  }, 60_000); // check every 60 s
 
   // Ready
   client.once(Events.ClientReady, (c) => {

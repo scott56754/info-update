@@ -2,6 +2,15 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { startBot } from "./bot/index.js";
 
+// ── Process-level crash protection ─────────────────────────────────────────
+// Prevent unhandled errors/rejections from killing the Node process entirely.
+process.on("uncaughtException", (err) => {
+  logger.error({ err }, "Uncaught exception — bot will keep running");
+});
+process.on("unhandledRejection", (reason) => {
+  logger.error({ reason }, "Unhandled promise rejection — bot will keep running");
+});
+
 const rawPort = process.env["PORT"];
 
 if (!rawPort) {
