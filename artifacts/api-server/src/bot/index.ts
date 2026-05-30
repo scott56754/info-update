@@ -464,7 +464,19 @@ async function handlePanelRedeem(interaction: any, client: Client, panelName: st
 
   const [key] = await db.select().from(panelKeys)
     .where(and(eq(panelKeys.panelId, panel.id), eq(panelKeys.keyCode, keyInput), eq(panelKeys.active, true)));
-  if (!key) return interaction.reply({ content: "❌ Invalid or already used key. Please check and try again.", flags: MessageFlags.Ephemeral });
+
+  // If not found in panelKeys, check if this key was directly assigned via /whitelist user
+  if (!key) {
+    const [assignedEntry] = await db.select().from(panelWhitelist)
+      .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.keyCode, keyInput)));
+    if (assignedEntry) {
+      if (assignedEntry.userId === interaction.user.id) {
+        return interaction.reply({ content: "✅ You are already whitelisted! Click **Get Script** to access your script.", flags: MessageFlags.Ephemeral });
+      }
+      return interaction.reply({ content: "❌ This key has already been assigned to another user.", flags: MessageFlags.Ephemeral });
+    }
+    return interaction.reply({ content: "❌ Invalid or already used key. Please check and try again.", flags: MessageFlags.Ephemeral });
+  }
   if (key.usedBy && key.usedBy !== interaction.user.id) return interaction.reply({ content: "❌ This key has already been redeemed by someone else.", flags: MessageFlags.Ephemeral });
 
   // Check key expiry

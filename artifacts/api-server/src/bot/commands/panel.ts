@@ -507,13 +507,16 @@ export const panelCommands = [
       const name = interaction.options.getString("panel", true).toLowerCase();
       const count = interaction.options.getInteger("count") ?? 1;
       const durationStr = interaction.options.getString("duration");
+
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
       const panel = await getPanel(interaction.guildId!, name);
-      if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, flags: MessageFlags.Ephemeral });
+      if (!panel) return interaction.editReply({ content: `❌ Panel **${name}** not found.` });
 
       let expiresAt: Date | null = null;
       if (durationStr) {
         const ms = parseDuration(durationStr);
-        if (!ms) return interaction.reply({ content: "❌ Invalid duration format. Use e.g. `7d`, `30d`, `24h`.", flags: MessageFlags.Ephemeral });
+        if (!ms) return interaction.editReply({ content: "❌ Invalid duration format. Use e.g. `7d`, `30d`, `24h`." });
         expiresAt = new Date(Date.now() + ms);
       }
 
