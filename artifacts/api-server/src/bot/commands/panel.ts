@@ -268,11 +268,29 @@ export const panelCommands = [
         const deleted = await db.delete(panelRoleWhitelist)
           .where(and(eq(panelRoleWhitelist.panelId, panel.id), eq(panelRoleWhitelist.roleId, role.id))).returning();
         if (!deleted.length) return interaction.reply({ content: `❌ <@&${role.id}> is not whitelisted for **${name}**.`, flags: MessageFlags.Ephemeral });
-        // Also remove any materialised user whitelist entries that were created via this role
+        await interaction.deferReply();
+        // Delete materialised entries created via this role
         await db.delete(panelWhitelist)
           .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.whitelistedBy, "role:" + role.id)));
-        await interaction.reply({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle("🚫 Role Unwhitelisted")
-          .addFields({ name: "Role", value: `<@&${role.id}> (${role.name})`, inline: true }, { name: "Panel", value: name, inline: true })] });
+        // Also sweep any other whitelist entries (key-redeemers, manual whitelists) who currently hold this role
+        let sweptCount = 0;
+        try {
+          const allWl = await db.select().from(panelWhitelist).where(eq(panelWhitelist.panelId, panel.id));
+          for (const entry of allWl) {
+            const member = await interaction.guild!.members.fetch(entry.userId).catch(() => null);
+            if (member?.roles.cache.has(role.id)) {
+              await db.delete(panelWhitelist)
+                .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, entry.userId)));
+              sweptCount++;
+            }
+          }
+        } catch {}
+        await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle("🚫 Role Unwhitelisted")
+          .addFields(
+            { name: "Role", value: `<@&${role.id}> (${role.name})`, inline: true },
+            { name: "Panel", value: name, inline: true },
+            { name: "Users Revoked", value: `${sweptCount} additional member(s) removed`, inline: false },
+          )] });
       }
     },
   },
@@ -316,16 +334,31 @@ export const panelCommands = [
 
       if (sub === "role") {
         const role = interaction.options.getRole("role", true);
+        await interaction.deferReply();
+        // Remove role whitelist + materialised entries tagged with this role
         await db.delete(panelRoleWhitelist).where(and(eq(panelRoleWhitelist.panelId, panel.id), eq(panelRoleWhitelist.roleId, role.id)));
-        // Remove any materialised user whitelist entries created via this role
         await db.delete(panelWhitelist).where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.whitelistedBy, "role:" + role.id)));
+        // Sweep all remaining whitelist entries: revoke any user who currently holds this role
+        let sweptCount = 0;
+        try {
+          const allWl = await db.select().from(panelWhitelist).where(eq(panelWhitelist.panelId, panel.id));
+          for (const entry of allWl) {
+            const member = await interaction.guild!.members.fetch(entry.userId).catch(() => null);
+            if (member?.roles.cache.has(role.id)) {
+              await db.delete(panelWhitelist)
+                .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, entry.userId)));
+              sweptCount++;
+            }
+          }
+        } catch {}
         await db.update(panelRoleBlacklist).set({ active: false }).where(and(eq(panelRoleBlacklist.panelId, panel.id), eq(panelRoleBlacklist.roleId, role.id)));
         await db.insert(panelRoleBlacklist).values({ panelId: panel.id, roleId: role.id, reason, blacklistedBy: interaction.user.id });
-        await interaction.reply({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle("🔨 Role Blacklisted")
+        await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle("🔨 Role Blacklisted")
           .addFields(
             { name: "Role", value: `<@&${role.id}> (${role.name})`, inline: true },
             { name: "Panel", value: name, inline: true },
             { name: "Reason", value: reason },
+            { name: "Users Revoked", value: `${sweptCount} member(s) had access removed`, inline: false },
           )
           .setFooter({ text: "All members with this role are now denied access." })] });
       }
