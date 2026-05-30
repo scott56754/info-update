@@ -268,13 +268,16 @@ export const panelCommands = [
   {
     data: new SlashCommandBuilder()
       .setName("unwhitelist")
-      .setDescription("Remove a user or role from the whitelist for a panel")
+      .setDescription("Remove a user, role, or everyone from the whitelist for a panel")
       .addSubcommand((s) => s.setName("user").setDescription("Remove a specific user")
         .addStringOption((o) => o.setName("panel").setDescription("Panel name").setRequired(true))
         .addUserOption((o) => o.setName("user").setDescription("User to remove").setRequired(true)))
       .addSubcommand((s) => s.setName("role").setDescription("Remove a role")
         .addStringOption((o) => o.setName("panel").setDescription("Panel name").setRequired(true))
-        .addRoleOption((o) => o.setName("role").setDescription("Role to remove").setRequired(true))),
+        .addRoleOption((o) => o.setName("role").setDescription("Role to remove").setRequired(true)))
+      .addSubcommand((s) => s.setName("everyone").setDescription("Remove ALL whitelisted users and roles from a panel")
+        .addStringOption((o) => o.setName("panel").setDescription("Panel name").setRequired(true))
+        .addStringOption((o) => o.setName("confirm").setDescription('Type "confirm" to proceed').setRequired(true))),
     async execute(interaction: ChatInputCommandInteraction) {
       if (!ownerOnly(interaction)) return;
       const sub = interaction.options.getSubcommand();
@@ -320,6 +323,35 @@ export const panelCommands = [
             { name: "Panel", value: name, inline: true },
             { name: "Users Revoked", value: `${sweptCount} additional member(s) removed`, inline: false },
           )] });
+      }
+
+      if (sub === "everyone") {
+        const confirm = interaction.options.getString("confirm", true).toLowerCase();
+        if (confirm !== "confirm") {
+          return interaction.reply({ content: '❌ You must type `confirm` in the confirm field to wipe the entire whitelist.', flags: MessageFlags.Ephemeral });
+        }
+        await interaction.deferReply();
+
+        // Count before deleting so we can report numbers
+        const usersBefore = await db.select().from(panelWhitelist).where(eq(panelWhitelist.panelId, panel.id));
+        const rolesBefore = await db.select().from(panelRoleWhitelist).where(eq(panelRoleWhitelist.panelId, panel.id));
+
+        await db.delete(panelWhitelist).where(eq(panelWhitelist.panelId, panel.id));
+        await db.delete(panelRoleWhitelist).where(eq(panelRoleWhitelist.panelId, panel.id));
+
+        await interaction.editReply({
+          embeds: [new EmbedBuilder()
+            .setColor(0xed4245)
+            .setTitle("🗑️ Whitelist Wiped")
+            .setDescription(`All whitelisted users and roles have been removed from **${name}**.`)
+            .addFields(
+              { name: "Users Removed", value: `${usersBefore.length}`, inline: true },
+              { name: "Roles Removed", value: `${rolesBefore.length}`, inline: true },
+              { name: "Panel", value: name, inline: true },
+              { name: "Wiped By", value: interaction.user.tag, inline: true },
+            )
+            .setTimestamp()],
+        });
       }
     },
   },
