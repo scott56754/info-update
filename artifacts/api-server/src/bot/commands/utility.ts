@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, Client, EmbedBuilder, PermissionFlagsBits } from "discord.js";
+import { SlashCommandBuilder, ChatInputCommandInteraction, Client, EmbedBuilder, PermissionFlagsBits , MessageFlags } from "discord.js";
 import { db } from "@workspace/db";
 import { afkUsers, reminders, inviteTracking, reports, guildSettings } from "@workspace/db";
 import { eq, and, count, desc } from "drizzle-orm";

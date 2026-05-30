@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, Client, EmbedBuilder, GuildMember, ActivityType } from "discord.js";
+import { SlashCommandBuilder, ChatInputCommandInteraction, Client, EmbedBuilder, GuildMember, ActivityType , MessageFlags } from "discord.js";
 
 function infoEmbed(color: number) {
   return new EmbedBuilder().setColor(color).setTimestamp();

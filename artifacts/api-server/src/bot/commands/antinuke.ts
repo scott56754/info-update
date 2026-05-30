@@ -1,6 +1,7 @@
 import {
   SlashCommandBuilder, ChatInputCommandInteraction, Client,
   EmbedBuilder, AuditLogEvent, GuildMember,
+  MessageFlags,
 } from "discord.js";
 import { db } from "@workspace/db";
 import { antiNukeSettings } from "@workspace/db";

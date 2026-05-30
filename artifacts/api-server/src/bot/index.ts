@@ -2,6 +2,7 @@ import {
   Client, GatewayIntentBits, Events, REST, Routes,
   ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder,
   EmbedBuilder, type Logger,
+  MessageFlags,
 } from "discord.js";
 import { logger } from "../lib/logger.js";
 import { db } from "@workspace/db";
@@ -38,13 +39,13 @@ const allCommands = [
   ...antiNukeCommands,
 ];
 
-const BASE_INTENTS = [
+// Non-privileged intents — always safe to request
+const SAFE_INTENTS = [
   GatewayIntentBits.Guilds,
   GatewayIntentBits.GuildMessages,
   GatewayIntentBits.GuildVoiceStates,
   GatewayIntentBits.GuildInvites,
   GatewayIntentBits.DirectMessages,
-  GatewayIntentBits.GuildMembers,
   GatewayIntentBits.GuildModeration,
 ];
 
@@ -58,43 +59,50 @@ export async function startBot() {
     return;
   }
 
-  // Progressively fall back intent combinations until one works.
-  // Privileged intents (MessageContent, GuildMembers, GuildModeration) must be enabled
-  // in the Discord Developer Portal under Bot → Privileged Gateway Intents.
-  const intentSets: Array<{ intents: GatewayIntentBits[]; prefixEnabled: boolean; label: string }> = [
+  // Try each intent combination from most to least privileged.
+  // Privileged intents require opt-in at:
+  //   Discord Developer Portal → Application → Bot → Privileged Gateway Intents
+  //   ✅ SERVER MEMBERS INTENT  — enables welcome, auto-role
+  //   ✅ MESSAGE CONTENT INTENT — enables prefix commands (. ! ?)
+  type IntentSet = { intents: GatewayIntentBits[]; prefixEnabled: boolean; membersEnabled: boolean; label: string };
+  const intentSets: IntentSet[] = [
     {
-      label: "full (MessageContent + GuildMembers + GuildModeration)",
-      intents: [...BASE_INTENTS, GatewayIntentBits.MessageContent],
+      label: "full (MessageContent + GuildMembers)",
+      intents: [...SAFE_INTENTS, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers],
       prefixEnabled: true,
+      membersEnabled: true,
     },
     {
-      label: "no MessageContent (GuildMembers + GuildModeration)",
-      intents: BASE_INTENTS,
+      label: "MessageContent only (no GuildMembers)",
+      intents: [...SAFE_INTENTS, GatewayIntentBits.MessageContent],
+      prefixEnabled: true,
+      membersEnabled: false,
+    },
+    {
+      label: "GuildMembers only (no MessageContent)",
+      intents: [...SAFE_INTENTS, GatewayIntentBits.GuildMembers],
       prefixEnabled: false,
+      membersEnabled: true,
     },
     {
       label: "minimal (no privileged intents)",
-      intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.GuildVoiceStates,
-        GatewayIntentBits.DirectMessages,
-      ],
+      intents: SAFE_INTENTS,
       prefixEnabled: false,
+      membersEnabled: false,
     },
   ];
 
-  for (const { intents, prefixEnabled, label } of intentSets) {
+  for (const { intents, prefixEnabled, membersEnabled, label } of intentSets) {
     try {
       const client = new Client({ intents });
-      await setupAndLogin(client, token, clientId, guildId, prefixEnabled);
+      await setupAndLogin(client, token, clientId, guildId, prefixEnabled, membersEnabled);
       return;
     } catch (err: any) {
       if (err?.message === "Used disallowed intents") {
         logger.warn(
           { label },
           "Intent set disallowed — trying next fallback. " +
-          "Enable Privileged Gateway Intents in Discord Developer Portal → Bot → Privileged Gateway Intents."
+          "Enable in Discord Developer Portal → Bot → Privileged Gateway Intents."
         );
       } else {
         throw err;
@@ -111,6 +119,7 @@ async function setupAndLogin(
   clientId: string,
   guildId: string | undefined,
   prefixEnabled: boolean,
+  membersEnabled: boolean,
 ) {
   // Register slash commands — guild first, global as fallback, always clear the other to avoid duplicates
   try {
@@ -142,60 +151,81 @@ async function setupAndLogin(
 
   // Ready
   client.once(Events.ClientReady, (c) => {
-    logger.info({ tag: c.user.tag, prefixEnabled }, "Discord bot ready");
+    logger.info(
+      {
+        tag: c.user.tag,
+        prefixCommands: prefixEnabled ? "✅ enabled (.  !  ?)" : "❌ disabled — enable Message Content Intent in Discord Dev Portal",
+        welcomeAutoRole: membersEnabled ? "✅ enabled" : "❌ disabled — enable Server Members Intent in Discord Dev Portal",
+      },
+      "Discord bot ready",
+    );
+    if (!prefixEnabled) {
+      logger.warn(
+        "Prefix commands (. ! ?) are DISABLED. " +
+        "To enable: Discord Dev Portal → Your App → Bot → Privileged Gateway Intents → turn on MESSAGE CONTENT INTENT",
+      );
+    }
+    if (!membersEnabled) {
+      logger.warn(
+        "Welcome/auto-role on join is DISABLED. " +
+        "To enable: Discord Dev Portal → Your App → Bot → Privileged Gateway Intents → turn on SERVER MEMBERS INTENT",
+      );
+    }
     c.user.setActivity("Serving the server", { type: 3 });
     startReminderLoop(client);
     startGiveawayLoop(client);
     setupAntiNuke(client);
   });
 
-  // Prefix commands (.!?)
+  // Prefix commands (.!?) — requires Message Content Intent
   if (prefixEnabled) {
     client.on(Events.MessageCreate, async (message) => {
       await handlePrefixMessage(message, client).catch(() => {});
     });
   }
 
-  // Welcome message + auto-role + DM on member join
-  client.on(Events.GuildMemberAdd, async (member) => {
-    try {
-      const [settings] = await db.select().from(guildSettings).where(eq(guildSettings.guildId, member.guild.id));
-      if (!settings) return;
+  // Welcome message + auto-role + DM on member join — requires Server Members Intent
+  if (membersEnabled) {
+    client.on(Events.GuildMemberAdd, async (member) => {
+      try {
+        const [settings] = await db.select().from(guildSettings).where(eq(guildSettings.guildId, member.guild.id));
+        if (!settings) return;
 
-      // Auto-roles (comma-separated IDs)
-      if (settings.welcomeAutoRoleId) {
-        const roleIds = settings.welcomeAutoRoleId.split(",").map((id) => id.trim()).filter(Boolean);
-        for (const roleId of roleIds) {
-          const role = member.guild.roles.cache.get(roleId);
-          if (role) await member.roles.add(role).catch(() => {});
+        // Auto-roles (comma-separated IDs)
+        if (settings.welcomeAutoRoleId) {
+          const roleIds = settings.welcomeAutoRoleId.split(",").map((id) => id.trim()).filter(Boolean);
+          for (const roleId of roleIds) {
+            const role = member.guild.roles.cache.get(roleId);
+            if (role) await member.roles.add(role).catch(() => {});
+          }
         }
-      }
 
-      // Welcome embed in channel
-      if (settings.welcomeChannel && settings.welcomeMessage) {
-        const ch = await member.guild.channels.fetch(settings.welcomeChannel).catch(() => null);
-        if (ch?.isTextBased()) {
-          const embed = buildWelcomeEmbed(settings, member, member.guild);
-          await (ch as any).send({ embeds: [embed] });
+        // Welcome embed in channel
+        if (settings.welcomeChannel && settings.welcomeMessage) {
+          const ch = await member.guild.channels.fetch(settings.welcomeChannel).catch(() => null);
+          if (ch?.isTextBased()) {
+            const embed = buildWelcomeEmbed(settings, member, member.guild);
+            await (ch as any).send({ embeds: [embed] });
+          }
         }
-      }
 
-      // DM the new member
-      if (settings.welcomeDmMessage) {
-        const dmText = replacePlaceholders(settings.welcomeDmMessage, member, member.guild);
-        const color = parseInt(settings.welcomeColor?.replace("#", "") ?? "5865f2", 16) || 0x5865f2;
-        const dmEmbed = new EmbedBuilder()
-          .setColor(color)
-          .setTitle(`👋 Welcome to ${member.guild.name}!`)
-          .setDescription(dmText)
-          .setThumbnail(member.guild.iconURL({ size: 256 }) ?? null)
-          .setTimestamp();
-        await member.user.send({ embeds: [dmEmbed] }).catch(() => {});
+        // DM the new member
+        if (settings.welcomeDmMessage) {
+          const dmText = replacePlaceholders(settings.welcomeDmMessage, member, member.guild);
+          const color = parseInt(settings.welcomeColor?.replace("#", "") ?? "5865f2", 16) || 0x5865f2;
+          const dmEmbed = new EmbedBuilder()
+            .setColor(color)
+            .setTitle(`👋 Welcome to ${member.guild.name}!`)
+            .setDescription(dmText)
+            .setThumbnail(member.guild.iconURL({ size: 256 }) ?? null)
+            .setTimestamp();
+          await member.user.send({ embeds: [dmEmbed] }).catch(() => {});
+        }
+      } catch (err) {
+        logger.error({ err }, "Failed to send welcome message");
       }
-    } catch (err) {
-      logger.error({ err }, "Failed to send welcome message");
-    }
-  });
+    });
+  }
 
   // Slash commands + button/modal interactions
   client.on(Events.InteractionCreate, async (interaction) => {

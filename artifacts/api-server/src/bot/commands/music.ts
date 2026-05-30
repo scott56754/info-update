@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder } from "discord.js";
+import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder , MessageFlags } from "discord.js";
 
 function musicEmbed(color: number) {
   return new EmbedBuilder().setColor(color).setTimestamp();

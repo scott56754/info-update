@@ -1,6 +1,7 @@
 import {
   SlashCommandBuilder, ChatInputCommandInteraction, Client,
   EmbedBuilder, PermissionFlagsBits, GuildMember,
+  MessageFlags,
 } from "discord.js";
 import { db } from "@workspace/db";
 import { warnings, mutes, guildSettings } from "@workspace/db";

@@ -2,6 +2,7 @@ import {
   SlashCommandBuilder, ChatInputCommandInteraction, Client,
   EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,
   PermissionFlagsBits, AttachmentBuilder,
+  MessageFlags,
 } from "discord.js";
 import { db } from "@workspace/db";
 import { panels, panelKeys, panelWhitelist, panelBlacklist } from "@workspace/db";

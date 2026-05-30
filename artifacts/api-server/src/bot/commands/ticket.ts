@@ -3,6 +3,7 @@ import {
   EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,
   ChannelType, PermissionFlagsBits, ButtonInteraction,
   OverwriteType,
+  MessageFlags,
 } from "discord.js";
 import { db } from "@workspace/db";
 import { ticketSettings, tickets } from "@workspace/db";

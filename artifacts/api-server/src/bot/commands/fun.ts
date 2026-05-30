@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, Client, EmbedBuilder, PermissionFlagsBits } from "discord.js";
+import { SlashCommandBuilder, ChatInputCommandInteraction, Client, EmbedBuilder, PermissionFlagsBits , MessageFlags } from "discord.js";
 
 const eightBallResponses = [
   "It is certain.", "It is decidedly so.", "Without a doubt.", "Yes, definitely.",

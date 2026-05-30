@@ -1,6 +1,7 @@
 import {
   SlashCommandBuilder, ChatInputCommandInteraction, Client,
   EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,
+  MessageFlags,
 } from "discord.js";
 import { db } from "@workspace/db";
 import { giveaways, giveawayEntries } from "@workspace/db";
