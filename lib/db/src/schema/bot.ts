@@ -159,10 +159,31 @@ export const panelBlacklist = pgTable("panel_blacklist", {
   active: boolean("active").notNull().default(true),
 }, (t) => [index("blacklist_panel_user_idx").on(t.panelId, t.userId)]);
 
+export const panelRoleWhitelist = pgTable("panel_role_whitelist", {
+  id: serial("id").primaryKey(),
+  panelId: integer("panel_id").notNull().references(() => panels.id, { onDelete: "cascade" }),
+  roleId: text("role_id").notNull(),
+  whitelistedBy: text("whitelisted_by").notNull(),
+  whitelistedAt: timestamp("whitelisted_at").defaultNow(),
+  expiresAt: timestamp("expires_at"),
+}, (t) => [index("role_whitelist_panel_role_idx").on(t.panelId, t.roleId)]);
+
+export const panelRoleBlacklist = pgTable("panel_role_blacklist", {
+  id: serial("id").primaryKey(),
+  panelId: integer("panel_id").notNull().references(() => panels.id, { onDelete: "cascade" }),
+  roleId: text("role_id").notNull(),
+  reason: text("reason").notNull().default("No reason provided"),
+  blacklistedBy: text("blacklisted_by").notNull(),
+  blacklistedAt: timestamp("blacklisted_at").defaultNow(),
+  active: boolean("active").notNull().default(true),
+}, (t) => [index("role_blacklist_panel_role_idx").on(t.panelId, t.roleId)]);
+
 export type Panel = typeof panels.$inferSelect;
 export type PanelKey = typeof panelKeys.$inferSelect;
 export type PanelWhitelist = typeof panelWhitelist.$inferSelect;
 export type PanelBlacklist = typeof panelBlacklist.$inferSelect;
+export type PanelRoleWhitelist = typeof panelRoleWhitelist.$inferSelect;
+export type PanelRoleBlacklist = typeof panelRoleBlacklist.$inferSelect;
 
 // ── Anti-Nuke Settings ─────────────────────────────────────────────────────
 

@@ -6,7 +6,7 @@ import {
 } from "discord.js";
 import { logger } from "../lib/logger.js";
 import { db } from "@workspace/db";
-import { reminders, panels, panelKeys, panelWhitelist, panelBlacklist, guildSettings } from "@workspace/db";
+import { reminders, panels, panelKeys, panelWhitelist, panelBlacklist, panelRoleWhitelist, panelRoleBlacklist, guildSettings } from "@workspace/db";
 import { lt, eq, and } from "drizzle-orm";
 
 import { funCommands } from "./commands/fun.js";
@@ -295,10 +295,28 @@ async function handlePanelButton(interaction: any, client: Client, action: strin
 
   const userId = interaction.user.id;
 
+  // Fetch member to get their roles
+  let memberRoleIds: string[] = [];
+  try {
+    const member = await interaction.guild.members.fetch(userId);
+    memberRoleIds = [...member.roles.cache.keys()];
+  } catch {}
+
+  // Check individual user blacklist
   const [bl] = await db.select().from(panelBlacklist)
     .where(and(eq(panelBlacklist.panelId, panel.id), eq(panelBlacklist.userId, userId), eq(panelBlacklist.active, true)));
   if (bl) {
     return interaction.reply({ content: `🔨 You are blacklisted from **${panelName}**.\n**Reason:** ${bl.reason}`, flags: MessageFlags.Ephemeral });
+  }
+
+  // Check role blacklist — if any of the user's roles are blacklisted, deny access
+  if (memberRoleIds.length) {
+    const roleBlacklists = await db.select().from(panelRoleBlacklist)
+      .where(and(eq(panelRoleBlacklist.panelId, panel.id), eq(panelRoleBlacklist.active, true)));
+    const blockedRole = roleBlacklists.find((rb) => memberRoleIds.includes(rb.roleId));
+    if (blockedRole) {
+      return interaction.reply({ content: `🔨 Your role is blacklisted from **${panelName}**.\n**Reason:** ${blockedRole.reason}`, flags: MessageFlags.Ephemeral });
+    }
   }
 
   const [wl] = await db.select().from(panelWhitelist)
@@ -307,6 +325,17 @@ async function handlePanelButton(interaction: any, client: Client, action: strin
   // Check whitelist expiry
   if (wl?.expiresAt && wl.expiresAt <= new Date()) {
     return interaction.reply({ content: "⏰ Your access has **expired**. Contact an admin to renew.", flags: MessageFlags.Ephemeral });
+  }
+
+  // Check role whitelist — if any of the user's roles are whitelisted, treat them as whitelisted
+  let roleWl: typeof panelRoleWhitelist.$inferSelect | undefined;
+  if (!wl && memberRoleIds.length) {
+    const roleWhitelists = await db.select().from(panelRoleWhitelist)
+      .where(eq(panelRoleWhitelist.panelId, panel.id));
+    const now = new Date();
+    roleWl = roleWhitelists.find((rw) =>
+      memberRoleIds.includes(rw.roleId) && !(rw.expiresAt && rw.expiresAt <= now)
+    );
   }
 
   if (action === "redeem") {
@@ -321,15 +350,19 @@ async function handlePanelButton(interaction: any, client: Client, action: strin
     return;
   }
 
+  const hasAccess = !!(wl || roleWl);
+
   if (action === "script") {
-    if (!wl) return interaction.reply({ content: "❌ You are not whitelisted — redeem a key first by clicking **Redeem Key**.", flags: MessageFlags.Ephemeral });
+    if (!hasAccess) return interaction.reply({ content: "❌ You are not whitelisted — redeem a key first by clicking **Redeem Key**.", flags: MessageFlags.Ephemeral });
     if (!panel.scriptContent) return interaction.reply({ content: "⚠️ No script has been set for this panel yet.", flags: MessageFlags.Ephemeral });
 
-    let userKey = wl.keyCode;
+    let userKey = wl?.keyCode ?? null;
     if (!userKey) {
       userKey = generateKey();
-      await db.update(panelWhitelist).set({ keyCode: userKey })
-        .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, userId)));
+      if (wl) {
+        await db.update(panelWhitelist).set({ keyCode: userKey })
+          .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, userId)));
+      }
     }
 
     const domain = process.env.REPLIT_DEV_DOMAIN
@@ -339,6 +372,7 @@ async function handlePanelButton(interaction: any, client: Client, action: strin
     const loaderUrl = `${domain}/api/loader/${encodeURIComponent(panelName)}/${encodeURIComponent(userKey)}`;
     const scriptBlock = `script_key="${userKey}";\nloadstring(game:HttpGet("${loaderUrl}"))()`;
 
+    const accessExpiry = wl?.expiresAt ?? roleWl?.expiresAt ?? null;
     await interaction.reply({ content: `Here is your script:\n\`\`\`lua\n${scriptBlock}\n\`\`\``, flags: MessageFlags.Ephemeral });
 
     try {
@@ -347,7 +381,7 @@ async function handlePanelButton(interaction: any, client: Client, action: strin
           .setDescription(`\`\`\`\n${userKey}\n\`\`\``)
           .addFields(
             { name: "Panel", value: panelName, inline: true },
-            { name: "Expires", value: wl.expiresAt ? `<t:${Math.floor(wl.expiresAt.getTime() / 1000)}:R>` : "Never", inline: true },
+            { name: "Expires", value: accessExpiry ? `<t:${Math.floor(accessExpiry.getTime() / 1000)}:R>` : "Never", inline: true },
           )
           .setFooter({ text: "Do not share this key." }).setTimestamp()],
       });
@@ -356,7 +390,7 @@ async function handlePanelButton(interaction: any, client: Client, action: strin
   }
 
   if (action === "role") {
-    if (!wl) return interaction.reply({ content: "❌ You are not whitelisted — redeem a key first.", flags: MessageFlags.Ephemeral });
+    if (!hasAccess) return interaction.reply({ content: "❌ You are not whitelisted — redeem a key first.", flags: MessageFlags.Ephemeral });
     if (!panel.roleId) return interaction.reply({ content: "⚠️ No role configured for this panel. Contact an admin.", flags: MessageFlags.Ephemeral });
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     try {
@@ -370,20 +404,24 @@ async function handlePanelButton(interaction: any, client: Client, action: strin
   }
 
   if (action === "hwid") {
-    if (!wl) return interaction.reply({ content: "❌ You are not whitelisted. Redeem a key first.", flags: MessageFlags.Ephemeral });
-    await db.update(panelWhitelist).set({ hwid: null })
-      .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, userId)));
+    if (!hasAccess) return interaction.reply({ content: "❌ You are not whitelisted. Redeem a key first.", flags: MessageFlags.Ephemeral });
+    if (wl) {
+      await db.update(panelWhitelist).set({ hwid: null })
+        .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, userId)));
+    }
     await interaction.reply({ content: "✅ Your HWID has been reset. You can use the script on a new device.", flags: MessageFlags.Ephemeral });
     return;
   }
 
   if (action === "stats") {
-    const expiryValue = wl?.expiresAt
-      ? (wl.expiresAt <= new Date() ? "⏰ Expired" : `<t:${Math.floor(wl.expiresAt.getTime() / 1000)}:R>`)
-      : "Never (permanent)";
+    const activeWl = wl ?? roleWl;
+    const accessType = wl ? "✅ Whitelisted (user)" : roleWl ? "✅ Whitelisted (role)" : "❌ No access";
+    const expiryValue = activeWl?.expiresAt
+      ? (activeWl.expiresAt <= new Date() ? "⏰ Expired" : `<t:${Math.floor(activeWl.expiresAt.getTime() / 1000)}:R>`)
+      : hasAccess ? "Never (permanent)" : "—";
     const e = new EmbedBuilder().setColor(0x2b2d31).setTitle("Your License Stats")
       .addFields(
-        { name: "Status", value: wl ? "✅ Whitelisted" : "❌ No access", inline: false },
+        { name: "Status", value: accessType, inline: false },
         { name: "HWID Locked", value: wl?.hwid ? "Yes" : "No", inline: false },
         { name: "Expires", value: expiryValue, inline: false },
       );
