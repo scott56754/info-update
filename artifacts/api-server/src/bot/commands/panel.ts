@@ -200,17 +200,19 @@ export const panelCommands = [
         const assignedKey = generateKey();
         await db.insert(panelWhitelist).values({ panelId: panel.id, userId: target.id, whitelistedBy: interaction.user.id, expiresAt, keyCode: assignedKey });
         // Auto-assign panel role if one is configured
-        let roleGranted = false;
+        let roleStatus = "";
         if (panel.roleId) {
           try {
-            const member = await interaction.guild!.members.fetch(target.id).catch(() => null);
-            if (member && !member.roles.cache.has(panel.roleId)) {
+            const member = await interaction.guild!.members.fetch(target.id);
+            if (!member.roles.cache.has(panel.roleId)) {
               await member.roles.add(panel.roleId, `whitelisted for panel: ${name}`);
-              roleGranted = true;
-            } else if (member?.roles.cache.has(panel.roleId)) {
-              roleGranted = true; // already had it
+              roleStatus = `✅ <@&${panel.roleId}> assigned`;
+            } else {
+              roleStatus = `✅ <@&${panel.roleId}> already had role`;
             }
-          } catch {}
+          } catch (err: any) {
+            roleStatus = `❌ <@&${panel.roleId}> — ${err?.message ?? "unknown error"} (check bot role hierarchy & Manage Roles permission)`;
+          }
         }
         const embed = new EmbedBuilder().setColor(0x57f287).setTitle("✅ User Whitelisted")
           .addFields(
@@ -219,7 +221,7 @@ export const panelCommands = [
             { name: "By", value: interaction.user.tag, inline: true },
             { name: "Key", value: `\`${assignedKey}\``, inline: true },
             { name: "Expires", value: expiresAt ? `<t:${Math.floor(expiresAt.getTime() / 1000)}:R>` : "Never (permanent)", inline: true },
-            ...(panel.roleId ? [{ name: "Role", value: roleGranted ? `✅ <@&${panel.roleId}> assigned` : `⚠️ <@&${panel.roleId}> — could not assign`, inline: true }] : []),
+            ...(roleStatus ? [{ name: "Role", value: roleStatus, inline: false }] : []),
           );
         await interaction.reply({ embeds: [embed] });
         try {
@@ -265,9 +267,9 @@ export const panelCommands = [
               // Auto-assign panel role if configured
               if (panel.roleId) {
                 try {
-                  const m = interaction.guild!.members.cache.get(memberId);
+                  const m = interaction.guild!.members.cache.get(memberId) ?? await interaction.guild!.members.fetch(memberId).catch(() => null);
                   if (m && !m.roles.cache.has(panel.roleId)) await m.roles.add(panel.roleId, `whitelisted for panel: ${name}`);
-                } catch {}
+                } catch { /* per-member role errors are non-fatal in bulk */ }
               }
               assigned++;
             }

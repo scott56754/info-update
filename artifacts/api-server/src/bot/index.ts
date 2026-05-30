@@ -482,13 +482,17 @@ async function handlePanelRedeem(interaction: any, client: Client, panelName: st
   });
 
   // Auto-assign panel role if one is configured
+  let roleNote = "";
   if (panel.roleId) {
     try {
-      const member = await interaction.guild!.members.fetch(interaction.user.id).catch(() => null);
-      if (member && !member.roles.cache.has(panel.roleId)) {
+      const member = await interaction.guild!.members.fetch(interaction.user.id);
+      if (!member.roles.cache.has(panel.roleId)) {
         await member.roles.add(panel.roleId, `key redeemed for panel: ${panelName}`);
+        roleNote = `\n✅ You've been given the <@&${panel.roleId}> role.`;
       }
-    } catch {}
+    } catch (err: any) {
+      roleNote = `\n⚠️ Could not assign role: ${err?.message ?? "unknown error"}.`;
+    }
   }
 
   const expiryNote = key.expiresAt
@@ -497,7 +501,7 @@ async function handlePanelRedeem(interaction: any, client: Client, panelName: st
 
   await interaction.reply({
     embeds: [new EmbedBuilder().setColor(0x57f287).setTitle("✅ Key Redeemed!")
-      .setDescription(`You are now whitelisted for **${panelName}**!\nClick **Get Script** to access your script.${expiryNote}`)
+      .setDescription(`You are now whitelisted for **${panelName}**!\nClick **Get Script** to access your script.${expiryNote}${roleNote}`)
       .setTimestamp()],
     flags: MessageFlags.Ephemeral,
   });
