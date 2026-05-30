@@ -1005,4 +1005,55 @@ export const panelCommands = [
       await interaction.reply({ embeds: [embed] });
     },
   },
+  {
+    data: new SlashCommandBuilder()
+      .setName("assignrole")
+      .setDescription("Give a role to every whitelisted user for a panel")
+      .addStringOption((o) => o.setName("panel").setDescription("Panel name").setRequired(true))
+      .addRoleOption((o) => o.setName("role").setDescription("Role to assign").setRequired(true)),
+    async execute(interaction: ChatInputCommandInteraction) {
+      if (!ownerOnly(interaction)) return;
+      const name = interaction.options.getString("panel", true).toLowerCase();
+      const role = interaction.options.getRole("role", true);
+      const panel = await getPanel(interaction.guildId!, name);
+      if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, flags: MessageFlags.Ephemeral });
+
+      await interaction.deferReply();
+
+      const whitelisted = await db.select().from(panelWhitelist).where(eq(panelWhitelist.panelId, panel.id));
+      if (!whitelisted.length) {
+        return interaction.editReply({ content: `⚠️ No whitelisted users found for **${name}**.` });
+      }
+
+      let assigned = 0;
+      let alreadyHad = 0;
+      let failed = 0;
+
+      for (const entry of whitelisted) {
+        try {
+          const member = await interaction.guild!.members.fetch(entry.userId).catch(() => null);
+          if (!member) { failed++; continue; }
+          if (member.roles.cache.has(role.id)) { alreadyHad++; continue; }
+          await member.roles.add(role.id, `assignrole: panel ${name}`);
+          assigned++;
+        } catch {
+          failed++;
+        }
+      }
+
+      await interaction.editReply({
+        embeds: [new EmbedBuilder()
+          .setColor(0x57f287)
+          .setTitle("✅ Role Assigned")
+          .setDescription(`Finished assigning <@&${role.id}> to all whitelisted users in **${name}**.`)
+          .addFields(
+            { name: "✅ Assigned", value: `${assigned}`, inline: true },
+            { name: "⏭️ Already Had Role", value: `${alreadyHad}`, inline: true },
+            { name: "❌ Failed / Left Server", value: `${failed}`, inline: true },
+            { name: "Panel", value: name, inline: true },
+          )
+          .setTimestamp()],
+      });
+    },
+  },
 ];
