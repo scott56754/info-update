@@ -197,12 +197,14 @@ export const panelCommands = [
         const [bl] = await db.select().from(panelBlacklist)
           .where(and(eq(panelBlacklist.panelId, panel.id), eq(panelBlacklist.userId, target.id), eq(panelBlacklist.active, true)));
         if (bl) return interaction.reply({ content: `❌ ${target.tag} is blacklisted from **${name}**. Unblacklist them first.`, flags: MessageFlags.Ephemeral });
-        await db.insert(panelWhitelist).values({ panelId: panel.id, userId: target.id, whitelistedBy: interaction.user.id, expiresAt });
+        const assignedKey = generateKey();
+        await db.insert(panelWhitelist).values({ panelId: panel.id, userId: target.id, whitelistedBy: interaction.user.id, expiresAt, keyCode: assignedKey });
         const embed = new EmbedBuilder().setColor(0x57f287).setTitle("✅ User Whitelisted")
           .addFields(
             { name: "User", value: `${target.tag} (${target.id})`, inline: true },
             { name: "Panel", value: name, inline: true },
             { name: "By", value: interaction.user.tag, inline: true },
+            { name: "Key", value: `\`${assignedKey}\``, inline: true },
             { name: "Expires", value: expiresAt ? `<t:${Math.floor(expiresAt.getTime() / 1000)}:R>` : "Never (permanent)", inline: true },
           );
         await interaction.reply({ embeds: [embed] });
@@ -223,16 +225,43 @@ export const panelCommands = [
         const [bl] = await db.select().from(panelRoleBlacklist)
           .where(and(eq(panelRoleBlacklist.panelId, panel.id), eq(panelRoleBlacklist.roleId, role.id), eq(panelRoleBlacklist.active, true)));
         if (bl) return interaction.reply({ content: `❌ <@&${role.id}> is blacklisted from **${name}**. Remove the role blacklist first.`, flags: MessageFlags.Ephemeral });
+        await interaction.deferReply();
         await db.insert(panelRoleWhitelist).values({ panelId: panel.id, roleId: role.id, whitelistedBy: interaction.user.id, expiresAt });
+        // Immediately assign a unique key to every current member of this role
+        let assigned = 0;
+        let skipped = 0;
+        try {
+          await interaction.guild!.members.fetch();
+          const guildRole = interaction.guild!.roles.cache.get(role.id);
+          if (guildRole) {
+            for (const [memberId] of guildRole.members) {
+              const [alreadyWl] = await db.select().from(panelWhitelist)
+                .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, memberId)));
+              if (alreadyWl) { skipped++; continue; }
+              const [isBlacklisted] = await db.select().from(panelBlacklist)
+                .where(and(eq(panelBlacklist.panelId, panel.id), eq(panelBlacklist.userId, memberId), eq(panelBlacklist.active, true)));
+              if (isBlacklisted) { skipped++; continue; }
+              await db.insert(panelWhitelist).values({
+                panelId: panel.id,
+                userId: memberId,
+                whitelistedBy: "role:" + role.id,
+                keyCode: generateKey(),
+                expiresAt,
+              });
+              assigned++;
+            }
+          }
+        } catch {}
         const embed = new EmbedBuilder().setColor(0x57f287).setTitle("✅ Role Whitelisted")
           .addFields(
             { name: "Role", value: `<@&${role.id}> (${role.name})`, inline: true },
             { name: "Panel", value: name, inline: true },
             { name: "By", value: interaction.user.tag, inline: true },
             { name: "Expires", value: expiresAt ? `<t:${Math.floor(expiresAt.getTime() / 1000)}:R>` : "Never (permanent)", inline: true },
+            { name: "Keys Assigned", value: `${assigned} member(s) got individual keys (${skipped} skipped)`, inline: false },
           )
-          .setFooter({ text: "All members with this role can now access the panel." });
-        await interaction.reply({ embeds: [embed] });
+          .setFooter({ text: "Each member now has their own key — use /listaccess or /keyinfo to view." });
+        await interaction.editReply({ embeds: [embed] });
       }
     },
   },
@@ -845,39 +874,98 @@ export const panelCommands = [
       ]);
 
       const now = new Date();
-
       const fmtExpiry = (expiresAt: Date | null | undefined) =>
-        expiresAt ? (expiresAt <= now ? " ⏰ **Expired**" : ` ⏰ ${formatTimeLeft(expiresAt)} left`) : " ⏰ Permanent";
+        expiresAt ? (expiresAt <= now ? "⏰ Expired" : `${formatTimeLeft(expiresAt)} left`) : "Permanent";
 
-      const wlUserLines = wlUsers.length
-        ? wlUsers.map((e) => `<@${e.userId}>${fmtExpiry(e.expiresAt)}`).join("\n")
-        : "_None_";
+      // Build detailed whitelist lines: user mention | key | expiry
+      const wlUserLines = wlUsers.map((e) => {
+        const keyPart = e.keyCode ? `\`${e.keyCode}\`` : "_no key yet_";
+        const expiry = fmtExpiry(e.expiresAt);
+        return `<@${e.userId}> | ${keyPart} | ${expiry}`;
+      });
 
-      const wlRoleLines = wlRoles.length
-        ? wlRoles.map((e) => `<@&${e.roleId}>${fmtExpiry(e.expiresAt)}`).join("\n")
-        : "_None_";
+      const wlRoleLines = wlRoles.map((e) =>
+        `<@&${e.roleId}> | ${fmtExpiry(e.expiresAt)}`
+      );
 
-      const blUserLines = blUsers.length
-        ? blUsers.map((e) => `<@${e.userId}> — ${e.reason}`).join("\n")
-        : "_None_";
+      const blUserLines = blUsers.map((e) => `<@${e.userId}> — ${e.reason}`);
+      const blRoleLines = blRoles.map((e) => `<@&${e.roleId}> — ${e.reason}`);
 
-      const blRoleLines = blRoles.length
-        ? blRoles.map((e) => `<@&${e.roleId}> — ${e.reason}`).join("\n")
-        : "_None_";
+      const totalWl = wlUsers.length + wlRoles.length;
+      const totalBl = blUsers.length + blRoles.length;
+
+      // If too large for an embed, send as a file
+      const fullText = [
+        `=== WHITELISTED USERS (${wlUsers.length}) ===`,
+        ...(wlUserLines.length ? wlUserLines : ["None"]),
+        "",
+        `=== WHITELISTED ROLES (${wlRoles.length}) ===`,
+        ...(wlRoleLines.length ? wlRoleLines : ["None"]),
+        "",
+        `=== BLACKLISTED USERS (${blUsers.length}) ===`,
+        ...(blUserLines.length ? blUserLines : ["None"]),
+        "",
+        `=== BLACKLISTED ROLES (${blRoles.length}) ===`,
+        ...(blRoleLines.length ? blRoleLines : ["None"]),
+      ].join("\n");
+
+      if (wlUsers.length > 30 || fullText.length > 3500) {
+        const file = new AttachmentBuilder(Buffer.from(fullText, "utf8"), { name: `access-${name}.txt` });
+        return interaction.reply({ content: `**${totalWl}** whitelisted · **${totalBl}** blacklisted`, files: [file], flags: MessageFlags.Ephemeral });
+      }
 
       const embed = new EmbedBuilder()
         .setColor(0x5865f2)
         .setTitle(`🔐 Access List — ${name}`)
         .addFields(
-          { name: `✅ Whitelisted Users (${wlUsers.length})`, value: wlUserLines, inline: false },
-          { name: `✅ Whitelisted Roles (${wlRoles.length})`, value: wlRoleLines, inline: false },
-          { name: `🔨 Blacklisted Users (${blUsers.length})`, value: blUserLines, inline: false },
-          { name: `🔨 Blacklisted Roles (${blRoles.length})`, value: blRoleLines, inline: false },
+          { name: `✅ Whitelisted Users (${wlUsers.length})`, value: wlUserLines.join("\n") || "_None_", inline: false },
+          { name: `✅ Whitelisted Roles (${wlRoles.length})`, value: wlRoleLines.join("\n") || "_None_", inline: false },
+          { name: `🔨 Blacklisted Users (${blUsers.length})`, value: blUserLines.join("\n") || "_None_", inline: false },
+          { name: `🔨 Blacklisted Roles (${blRoles.length})`, value: blRoleLines.join("\n") || "_None_", inline: false },
         )
-        .setFooter({ text: `Total: ${wlUsers.length + wlRoles.length} whitelisted · ${blUsers.length + blRoles.length} blacklisted` })
+        .setFooter({ text: `Total: ${totalWl} whitelisted · ${totalBl} blacklisted` })
         .setTimestamp();
 
       await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+    },
+  },
+  {
+    data: new SlashCommandBuilder()
+      .setName("setexpiry")
+      .setDescription("Change or clear the expiry on a user's whitelist entry")
+      .addStringOption((o) => o.setName("panel").setDescription("Panel name").setRequired(true))
+      .addUserOption((o) => o.setName("user").setDescription("User to update").setRequired(true))
+      .addStringOption((o) => o.setName("duration").setDescription("New duration e.g. 7d, 30d, 1h — or 'permanent' to remove expiry").setRequired(true)),
+    async execute(interaction: ChatInputCommandInteraction) {
+      if (!ownerOnly(interaction)) return;
+      const name = interaction.options.getString("panel", true).toLowerCase();
+      const target = interaction.options.getUser("user", true);
+      const durationStr = interaction.options.getString("duration", true).trim().toLowerCase();
+      const panel = await getPanel(interaction.guildId!, name);
+      if (!panel) return interaction.reply({ content: `❌ Panel **${name}** not found.`, flags: MessageFlags.Ephemeral });
+
+      const [wl] = await db.select().from(panelWhitelist)
+        .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, target.id)));
+      if (!wl) return interaction.reply({ content: `❌ ${target.tag} is not whitelisted for **${name}**.`, flags: MessageFlags.Ephemeral });
+
+      let newExpiry: Date | null = null;
+      if (durationStr !== "permanent") {
+        const ms = parseDuration(durationStr);
+        if (!ms) return interaction.reply({ content: "❌ Invalid duration. Use e.g. `7d`, `30d`, `24h`, or `permanent`.", flags: MessageFlags.Ephemeral });
+        newExpiry = new Date(Date.now() + ms);
+      }
+
+      await db.update(panelWhitelist).set({ expiresAt: newExpiry })
+        .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, target.id)));
+
+      const embed = new EmbedBuilder().setColor(0xfee75c).setTitle("⏰ Expiry Updated")
+        .addFields(
+          { name: "User", value: `${target.tag} (${target.id})`, inline: true },
+          { name: "Panel", value: name, inline: true },
+          { name: "New Expiry", value: newExpiry ? `<t:${Math.floor(newExpiry.getTime() / 1000)}:R>` : "Permanent (no expiry)", inline: false },
+          { name: "Key", value: wl.keyCode ? `\`${wl.keyCode}\`` : "_no key assigned_", inline: true },
+        );
+      await interaction.reply({ embeds: [embed] });
     },
   },
 ];
