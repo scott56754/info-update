@@ -946,14 +946,19 @@ export const panelCommands = [
         return interaction.reply({ content: `**${totalWl}** whitelisted · **${totalBl}** blacklisted`, files: [file], flags: MessageFlags.Ephemeral });
       }
 
+      const cap = (lines: string[], fallback: string) => {
+        const joined = lines.join("\n") || fallback;
+        return joined.length > 1024 ? joined.slice(0, 1021) + "…" : joined;
+      };
+
       const embed = new EmbedBuilder()
         .setColor(0x5865f2)
         .setTitle(`🔐 Access List — ${name}`)
         .addFields(
-          { name: `✅ Whitelisted Users (${wlUsers.length})`, value: wlUserLines.join("\n") || "_None_", inline: false },
-          { name: `✅ Whitelisted Roles (${wlRoles.length})`, value: wlRoleLines.join("\n") || "_None_", inline: false },
-          { name: `🔨 Blacklisted Users (${blUsers.length})`, value: blUserLines.join("\n") || "_None_", inline: false },
-          { name: `🔨 Blacklisted Roles (${blRoles.length})`, value: blRoleLines.join("\n") || "_None_", inline: false },
+          { name: `✅ Whitelisted Users (${wlUsers.length})`, value: cap(wlUserLines, "_None_"), inline: false },
+          { name: `✅ Whitelisted Roles (${wlRoles.length})`, value: cap(wlRoleLines, "_None_"), inline: false },
+          { name: `🔨 Blacklisted Users (${blUsers.length})`, value: cap(blUserLines, "_None_"), inline: false },
+          { name: `🔨 Blacklisted Roles (${blRoles.length})`, value: cap(blRoleLines, "_None_"), inline: false },
         )
         .setFooter({ text: `Total: ${totalWl} whitelisted · ${totalBl} blacklisted` })
         .setTimestamp();
