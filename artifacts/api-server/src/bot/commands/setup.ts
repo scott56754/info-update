@@ -116,11 +116,15 @@ export const setupCommands = [
         welcomeColor: colorHex,
       });
 
+      const rolesMention = roleIds.length
+        ? roleIds.map((id) => `<@&${id}>`).join(", ")
+        : "None";
+
       const embed = setupEmbed(0x57f287)
         .setTitle("⚙️ Welcome System Configured")
         .addFields(
           { name: "Channel", value: `${channel}`, inline: true },
-          { name: "Auto-Role", value: autoRole ? `${autoRole}` : "None", inline: true },
+          { name: "Auto-Role(s)", value: rolesMention, inline: true },
           { name: "DM on Join", value: dmMsg ? "✅ Enabled" : "❌ Off", inline: true },
           { name: "Message", value: `\`\`\`${message}\`\`\``, inline: false },
         )
