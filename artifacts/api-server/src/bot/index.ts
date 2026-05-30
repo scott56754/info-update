@@ -319,7 +319,7 @@ async function handlePanelButton(interaction: any, client: Client, action: strin
     }
   }
 
-  const [wl] = await db.select().from(panelWhitelist)
+  let [wl] = await db.select().from(panelWhitelist)
     .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, userId)));
 
   // Check whitelist expiry
@@ -355,6 +355,25 @@ async function handlePanelButton(interaction: any, client: Client, action: strin
   if (action === "script") {
     if (!hasAccess) return interaction.reply({ content: "❌ You are not whitelisted — redeem a key first by clicking **Redeem Key**.", flags: MessageFlags.Ephemeral });
     if (!panel.scriptContent) return interaction.reply({ content: "⚠️ No script has been set for this panel yet.", flags: MessageFlags.Ephemeral });
+
+    // If user only has access via role whitelist, materialise a user whitelist entry so the loader can validate the key
+    if (!wl && roleWl) {
+      const [existing] = await db.select().from(panelWhitelist)
+        .where(and(eq(panelWhitelist.panelId, panel.id), eq(panelWhitelist.userId, userId)));
+      if (existing) {
+        wl = existing;
+      } else {
+        const newKey = generateKey();
+        const [inserted] = await db.insert(panelWhitelist).values({
+          panelId: panel.id,
+          userId,
+          whitelistedBy: "role:" + roleWl.roleId,
+          keyCode: newKey,
+          expiresAt: roleWl.expiresAt ?? null,
+        }).returning();
+        wl = inserted;
+      }
+    }
 
     let userKey = wl?.keyCode ?? null;
     if (!userKey) {
