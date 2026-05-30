@@ -189,6 +189,31 @@ export const setupCommands = [
   },
   {
     data: new SlashCommandBuilder()
+      .setName("deletewelcome")
+      .setDescription("Remove the welcome system configuration for this server")
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    async execute(interaction: ChatInputCommandInteraction) {
+      if (!ownerOnly(interaction)) return;
+      await upsertSettings(interaction.guildId!, {
+        welcomeChannel: null,
+        welcomeMessage: null,
+        welcomeImageUrl: null,
+        welcomeAutoRoleId: null,
+        welcomeDmMessage: null,
+        welcomeColor: null,
+      });
+      await interaction.reply({
+        embeds: [
+          setupEmbed(0xed4245)
+            .setTitle("🗑️ Welcome System Removed")
+            .setDescription("All welcome settings have been cleared. Use `/setwelcome` to set it up again."),
+        ],
+        flags: MessageFlags.Ephemeral,
+      });
+    },
+  },
+  {
+    data: new SlashCommandBuilder()
       .setName("autorole")
       .setDescription("Set, remove, or check the auto-role given to every new member")
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
